@@ -37,7 +37,7 @@ def safe_extract(zip_ref, target_dir):
         # Validate filename is not empty and not just path separators
         if not filename:
             raise PathTraversalError("Invalid filename in zip file: empty filename")
-        if set(filename) <= {"/", "\\"}:
+        if not filename.strip("/\\"):
             raise PathTraversalError(f"Invalid filename in zip file (only path separators): {filename!r}")
         
         # Normalize and validate the path
@@ -48,7 +48,9 @@ def safe_extract(zip_ref, target_dir):
             raise PathTraversalError(f"Attempted path traversal in zip file: {member.filename}")
         
         # Reject symbolic links to prevent symlink-based attacks
-        # Check if the file mode indicates a symlink (Unix systems)
+        # Note: This check relies on Unix file permissions in external_attr (bits 16-31).
+        # It works for zip files created on Unix/Linux systems but may not detect
+        # symlinks in zip files created on Windows or by non-standard tools.
         if (member.external_attr >> 16) & 0o170000 == stat.S_IFLNK:
             raise PathTraversalError(f"Zip file contains symbolic link: {member.filename}")
         
