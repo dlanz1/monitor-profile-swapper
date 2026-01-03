@@ -34,8 +34,10 @@ def load_config():
 
 def save_config(config):
     try:
-        with open(CONFIG_FILE, 'w') as f:
+        tmp_file = CONFIG_FILE + ".tmp"
+        with open(tmp_file, 'w') as f:
             json.dump(config, f, indent=4)
+        os.replace(tmp_file, CONFIG_FILE)
         messagebox.showinfo("Success", "Configuration saved successfully!")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to save config: {e}")

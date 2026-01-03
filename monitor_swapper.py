@@ -32,6 +32,8 @@ DEFAULT_CONFIG = {
 
 # Global flag to stop threads
 stop_event = threading.Event()
+update_lock = threading.Lock()
+config_lock = threading.Lock()
 
 def check_vcredist_installed():
     """
@@ -202,8 +204,11 @@ def prompt_startup_option():
     # Mark as prompted so we don't ask again
     config["startup_prompted"] = True
     try:
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(config, f, indent=4)
+        with config_lock:
+            tmp_file = CONFIG_FILE + ".tmp"
+            with open(tmp_file, 'w') as f:
+                json.dump(config, f, indent=4)
+            os.replace(tmp_file, CONFIG_FILE)
     except Exception:
         pass
 
@@ -212,8 +217,9 @@ def load_config():
         print("Config file not found, using defaults.")
         return DEFAULT_CONFIG
     try:
-        with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
+        with config_lock:
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
     except Exception as e:
         print(f"Error loading config: {e}. Using defaults.")
         return DEFAULT_CONFIG
@@ -348,6 +354,9 @@ def quit_app(icon, item):
 
 def manual_update_check(icon, item):
     def run_check():
+        if not update_lock.acquire(blocking=False):
+            return
+
         # Use standard Windows MessageBox for feedback
         MB_OK = 0x0
         MB_YESNO = 0x4
@@ -373,6 +382,8 @@ def manual_update_check(icon, item):
         except Exception as e:
             ctypes.windll.user32.MessageBoxW(0, f"Update check failed: {e}", "Error", 
                                              MB_OK | 0x10 | MB_TOPMOST | MB_SETFOREGROUND)
+        finally:
+            update_lock.release()
 
     # Run check in a background thread so the tray menu doesn't hang
     threading.Thread(target=run_check, daemon=True).start()
