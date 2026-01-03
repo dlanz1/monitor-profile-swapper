@@ -10,7 +10,7 @@ import re
 from packaging import version
 
 # Current version of the application
-CURRENT_VERSION = "v1.4.7"
+CURRENT_VERSION = "v1.4.8"
 
 # GitHub Repository details
 REPO_OWNER = "dlanz1"
@@ -271,8 +271,10 @@ def perform_update(release_data):
     # Using 'start /i' or a fresh 'cmd /c' helps ensure environment isolation.
     batch_script = f"""@echo off
 setlocal enabledelayedexpansion
+
+echo [{timestamp}] Starting update process...
 echo [{timestamp}] Starting update... > "{log_path_safe}"
-echo Finalizing update...
+
 echo [{timestamp}] Killing processes... >> "{log_path_safe}"
 taskkill /F /IM "{exe_name}" /T > NUL 2>&1
 taskkill /F /IM Settings.exe /T > NUL 2>&1
@@ -282,22 +284,27 @@ echo Updating files in {base_dir_safe}...
 echo [{timestamp}] Current directory: %cd% >> "{log_path_safe}"
 echo [{timestamp}] Target directory: {base_dir_safe} >> "{log_path_safe}"
 echo [{timestamp}] Extract folder: {extract_folder_safe} >> "{log_path_safe}"
+
 echo [{timestamp}] Running robocopy... >> "{log_path_safe}"
 cd /d "{base_dir_safe}"
 if errorlevel 1 (
-    echo [{timestamp}] Failed to change directory to {base_dir_safe} >> "{log_path_safe}"
-    echo Failed to change directory.
+    echo [{timestamp}] ERROR: Failed to change directory to {base_dir_safe} >> "{log_path_safe}"
+    echo ERROR: Failed to change directory.
     pause
     exit /b 1
 )
-robocopy "{extract_folder_safe}" "{base_dir_safe}" /E /IS /IT /NP /R:3 /W:5 /XF config.json >> "{log_path_safe}"
 
+robocopy "{extract_folder_safe}" "{base_dir_safe}" /E /IS /IT /NP /R:3 /W:5 /XF config.json >> "{log_path_safe}"
 set ROBO_EXIT=!errorlevel!
 echo [{timestamp}] Robocopy exit code: !ROBO_EXIT! >> "{log_path_safe}"
 
 if !ROBO_EXIT! geq 8 (
-    echo Update failed! Check update_log.txt
-    echo [{timestamp}] Robocopy failed with exit code !ROBO_EXIT! >> "{log_path_safe}"
+    echo.
+    echo --------------------------------------------------
+    echo UPDATE FAILED (Robocopy Error !ROBO_EXIT!)
+    echo Check "{log_path_safe}" for details.
+    echo --------------------------------------------------
+    echo [{timestamp}] ERROR: Robocopy failed with exit code !ROBO_EXIT! >> "{log_path_safe}"
     pause
     exit /b 1
 )
@@ -308,14 +315,21 @@ del "{zip_path_safe}" 2>NUL
 
 echo Restarting application...
 echo [{timestamp}] Restarting MonitorSwapper... >> "{log_path_safe}"
-set _MEIPASS=
-set _MEI=
-start "" "{exe_path_safe}"
-{settings_launch}
 
-echo [{timestamp}] Update process finished. >> "{log_path_safe}"
+:: Use PowerShell to start the processes to ensure fresh environment
+powershell -Command "Start-Process '{exe_path_safe}'" >> "{log_path_safe}" 2>&1
+if !errorlevel! neq 0 (
+    echo [{timestamp}] WARNING: PowerShell failed to start MonitorSwapper. Trying direct start. >> "{log_path_safe}"
+    start "" "{exe_path_safe}"
+)
+
+if "{settings_exists}"=="True" (
+    powershell -Command "Start-Process '{settings_path_safe}'" >> "{log_path_safe}" 2>&1
+)
+
+echo [{timestamp}] Update process finished successfully. >> "{log_path_safe}"
 echo Update successful.
-pause
+timeout /t 5
 """
     
     try:
