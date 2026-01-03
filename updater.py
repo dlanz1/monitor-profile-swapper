@@ -4,6 +4,7 @@ import sys
 import subprocess
 import zipfile
 import shutil
+import stat
 from packaging import version
 
 # Current version of the application
@@ -18,19 +19,41 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+class PathTraversalError(Exception):
+    """Exception raised when a zip file contains a path traversal attempt."""
+    pass
+
+
 def safe_extract(zip_ref, target_dir):
     """
     Extracts files from a zip archive to a target directory,
     ensuring that no files are extracted outside the target directory.
+    Validates against path traversal attacks and symbolic link exploits.
     """
     target_dir = os.path.abspath(target_dir)
     for member in zip_ref.infolist():
-        member_path = os.path.abspath(os.path.join(target_dir, member.filename))
-        # Prevent partial path traversal (e.g., /tmp/test matching /tmp/test_hack)
-        if not os.path.commonpath([target_dir]) == os.path.commonpath([target_dir, member_path]):
-             raise Exception(f"Attempted path traversal in zip file: {member.filename}")
-
-    zip_ref.extractall(target_dir)
+        filename = member.filename
+        
+        # Validate filename is not empty and not just path separators
+        if not filename:
+            raise PathTraversalError("Invalid filename in zip file: empty filename")
+        if set(filename) <= {"/", "\\"}:
+            raise PathTraversalError(f"Invalid filename in zip file (only path separators): {filename!r}")
+        
+        # Normalize and validate the path
+        member_path = os.path.abspath(os.path.normpath(os.path.join(target_dir, filename)))
+        
+        # Prevent path traversal (e.g., ../../../etc/passwd)
+        if os.path.commonpath([target_dir, member_path]) != target_dir:
+            raise PathTraversalError(f"Attempted path traversal in zip file: {member.filename}")
+        
+        # Reject symbolic links to prevent symlink-based attacks
+        # Check if the file mode indicates a symlink (Unix systems)
+        if (member.external_attr >> 16) & 0o170000 == stat.S_IFLNK:
+            raise PathTraversalError(f"Zip file contains symbolic link: {member.filename}")
+        
+        # Extract each validated member individually to maintain full control
+        zip_ref.extract(member, target_dir)
 
 def check_for_updates():
     """
