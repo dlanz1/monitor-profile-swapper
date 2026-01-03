@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, simpledialog, ttk, filedialog
 import json
 import os
 import sys
@@ -75,7 +75,8 @@ class ConfigApp(ttk.Frame):
         btn_row = ttk.Frame(proc_frame)
         btn_row.pack(fill="x", pady=(10, 0))
         
-        ttk.Button(btn_row, text="Add Process", command=self.add_process).pack(side="left", padx=(0, 5))
+        ttk.Button(btn_row, text="Add Manually", command=self.add_process).pack(side="left", padx=(0, 5))
+        ttk.Button(btn_row, text="Browse...", command=self.browse_process).pack(side="left", padx=(0, 5))
         ttk.Button(btn_row, text="Remove Selected", command=self.remove_process).pack(side="left")
 
         # --- Settings Section ---
@@ -212,6 +213,18 @@ class ConfigApp(ttk.Frame):
         if new_proc:
             if new_proc not in self.config["game_processes"]:
                 self.config["game_processes"].append(new_proc)
+                self.refresh_ui()
+
+    def browse_process(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Game Executable",
+            filetypes=[("Executable Files", "*.exe"), ("All Files", "*.*")],
+            parent=self.root
+        )
+        if file_path:
+            filename = os.path.basename(file_path)
+            if filename not in self.config["game_processes"]:
+                self.config["game_processes"].append(filename)
                 self.refresh_ui()
 
     def remove_process(self):
