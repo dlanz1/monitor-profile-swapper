@@ -90,25 +90,45 @@ def monitoring_loop():
     if hdr_in_game:
         hdr_control.set_hdr_mode(False)
 
+    # Track previous HDR config to detect runtime changes
+    prev_hdr_in_game = hdr_in_game
+
     while not stop_event.is_set():
-        # Reload config periodically? For now, we assume restart on config change
-        # But we can reload basic flags if needed.
-        
+        # Reload config periodically (every 2 seconds along with process check)
+        try:
+            # Re-read config to pick up changes dynamically
+            new_config = load_config()
+            game_processes = new_config.get("game_processes", [])
+            game_mode = new_config.get("game_mode", {})
+            desktop_mode = new_config.get("desktop_mode", {})
+            hdr_in_game = game_mode.get("hdr_enabled", False)
+        except Exception:
+            pass # Keep old config on error
+
         is_running = check_process(game_processes)
         
         if is_running and not in_game_mode:
             print("DETECTED LAUNCH! Switching to Game settings...")
-            set_monitor(game_mode.get("brightness", 80), game_mode.get("contrast", 80))
-            if hdr_in_game:
-                hdr_control.set_hdr_mode(True)
-            in_game_mode = True
+            if set_monitor(game_mode.get("brightness", 80), game_mode.get("contrast", 80)):
+                if hdr_in_game:
+                    hdr_control.set_hdr_mode(True)
+                in_game_mode = True
         
         elif not is_running and in_game_mode:
             print("DETECTED CLOSE. Restoring Desktop settings...")
-            set_monitor(desktop_mode.get("brightness", 50), desktop_mode.get("contrast", 50))
-            if hdr_in_game:
-                hdr_control.set_hdr_mode(False)
-            in_game_mode = False
+            if set_monitor(desktop_mode.get("brightness", 50), desktop_mode.get("contrast", 50)):
+                # If we were in game mode, and HDR was enabled there, we disable it now.
+                # Even if user just disabled it in config, we want to ensure it's OFF for desktop.
+                if prev_hdr_in_game or hdr_in_game:
+                    hdr_control.set_hdr_mode(False)
+                in_game_mode = False
+
+        # Handle HDR config change while in game mode
+        if in_game_mode and hdr_in_game != prev_hdr_in_game:
+            print(f"HDR Config Changed (Enabled={hdr_in_game}). Applying...")
+            hdr_control.set_hdr_mode(hdr_in_game)
+
+        prev_hdr_in_game = hdr_in_game
         
         time.sleep(2)
 
