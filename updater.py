@@ -10,7 +10,7 @@ import re
 from packaging import version
 
 # Current version of the application
-CURRENT_VERSION = "v1.4.5"
+CURRENT_VERSION = "v1.4.6"
 
 # GitHub Repository details
 REPO_OWNER = "dlanz1"
@@ -279,7 +279,7 @@ timeout /t 3 /nobreak > NUL
 echo Updating files in {base_dir_safe}...
 echo [{timestamp}] Running robocopy... >> "{log_path_safe}"
 cd /d "{base_dir_safe}"
-robocopy "{extract_folder_safe}" "{base_dir_safe}" /E /IS /IT /NP /R:3 /W:5 >> "{log_path_safe}"
+robocopy "{extract_folder_safe}" "{base_dir_safe}" /E /IS /IT /NP /R:3 /W:5 /XF config.json >> "{log_path_safe}"
 
 set ROBO_EXIT=%%errorlevel%%
 echo [{timestamp}] Robocopy exit code: %%ROBO_EXIT%% >> "{log_path_safe}"
