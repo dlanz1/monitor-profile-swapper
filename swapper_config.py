@@ -1,8 +1,9 @@
 import tkinter as tk
-from tkinter import messagebox, simpledialog
+from tkinter import messagebox, simpledialog, ttk
 import json
 import os
 import sys
+import sv_ttk
 
 CONFIG_FILE = "config.json"
 
@@ -30,59 +31,84 @@ def save_config(config):
     except Exception as e:
         messagebox.showerror("Error", f"Failed to save config: {e}")
 
-class ConfigApp:
+class ConfigApp(ttk.Frame):
     def __init__(self, root):
+        super().__init__(root)
         self.root = root
-        self.root.title("Monitor Profile Swapper Settings")
+        self.root.title("Monitor Profile Swapper")
+        self.root.geometry("600x550")
+        
+        # Apply the Windows 11 style theme (Dark or Light based on system, or force one)
+        # sv_ttk.set_theme("dark")  # You can toggle this
+        sv_ttk.set_theme("light")
+
         self.config = load_config()
+        self.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # Frames
-        self.proc_frame = tk.LabelFrame(root, text="Game Processes (Watch List)")
-        self.proc_frame.pack(fill="both", expand="yes", padx=10, pady=5)
+        # Header
+        header_lbl = ttk.Label(self, text="Profile Settings", font=("Segoe UI Variable Display", 18, "bold"))
+        header_lbl.pack(anchor="w", pady=(0, 20))
 
-        self.settings_frame = tk.LabelFrame(root, text="Monitor Settings (0-100)")
-        self.settings_frame.pack(fill="both", expand="yes", padx=10, pady=5)
+        # --- Game Processes Section ---
+        proc_frame = ttk.LabelFrame(self, text="Watched Processes", padding=(15, 10))
+        proc_frame.pack(fill="both", expand=True, pady=(0, 15))
 
-        self.btn_frame = tk.Frame(root)
-        self.btn_frame.pack(fill="x", padx=10, pady=10)
-
-        # Process List
-        self.proc_listbox = tk.Listbox(self.proc_frame, height=6)
-        self.proc_listbox.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        self.proc_listbox = tk.Listbox(proc_frame, height=6, font=("Segoe UI", 10), 
+                                       borderwidth=0, highlightthickness=1, selectmode="single")
+        self.proc_listbox.pack(side="left", fill="both", expand=True, padx=(0, 5))
         
-        self.scrollbar = tk.Scrollbar(self.proc_frame)
-        self.scrollbar.pack(side="right", fill="y")
-        self.proc_listbox.config(yscrollcommand=self.scrollbar.set)
-        self.scrollbar.config(command=self.proc_listbox.yview)
+        scrollbar = ttk.Scrollbar(proc_frame, orient="vertical", command=self.proc_listbox.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.proc_listbox.config(yscrollcommand=scrollbar.set)
 
-        self.proc_btn_frame = tk.Frame(self.proc_frame)
-        self.proc_btn_frame.pack(side="bottom", fill="x", padx=5, pady=5)
+        btn_row = ttk.Frame(proc_frame)
+        btn_row.pack(fill="x", pady=(10, 0))
         
-        tk.Button(self.proc_btn_frame, text="Add Process", command=self.add_process).pack(side="left", padx=5)
-        tk.Button(self.proc_btn_frame, text="Remove Selected", command=self.remove_process).pack(side="left", padx=5)
+        ttk.Button(btn_row, text="Add Process", command=self.add_process).pack(side="left", padx=(0, 5))
+        ttk.Button(btn_row, text="Remove Selected", command=self.remove_process).pack(side="left")
 
-        # Settings Inputs
-        # Game Mode
-        tk.Label(self.settings_frame, text="Game Mode", font=("Arial", 10, "bold")).grid(row=0, column=0, columnspan=2, pady=5)
-        tk.Label(self.settings_frame, text="Brightness:").grid(row=1, column=0, sticky="e")
-        self.game_bri = tk.Entry(self.settings_frame, width=10)
-        self.game_bri.grid(row=1, column=1)
-        tk.Label(self.settings_frame, text="Contrast:").grid(row=2, column=0, sticky="e")
-        self.game_con = tk.Entry(self.settings_frame, width=10)
-        self.game_con.grid(row=2, column=1)
+        # --- Settings Section ---
+        settings_container = ttk.LabelFrame(self, text="Monitor Calibration (0-100)", padding=(15, 15))
+        settings_container.pack(fill="x", pady=(0, 20))
 
-        # Desktop Mode
-        tk.Label(self.settings_frame, text="Desktop Mode", font=("Arial", 10, "bold")).grid(row=0, column=2, columnspan=2, pady=5)
-        tk.Label(self.settings_frame, text="Brightness:").grid(row=1, column=2, sticky="e")
-        self.desk_bri = tk.Entry(self.settings_frame, width=10)
-        self.desk_bri.grid(row=1, column=3)
-        tk.Label(self.settings_frame, text="Contrast:").grid(row=2, column=2, sticky="e")
-        self.desk_con = tk.Entry(self.settings_frame, width=10)
-        self.desk_con.grid(row=2, column=3)
+        # Grid Layout for Settings
+        settings_container.columnconfigure(1, weight=1)
+        settings_container.columnconfigure(3, weight=1)
 
-        # Action Buttons
-        tk.Button(self.btn_frame, text="Save Settings", command=self.save_settings, bg="#dddddd").pack(side="right", padx=10)
-        tk.Button(self.btn_frame, text="Reload from File", command=self.refresh_ui).pack(side="right", padx=10)
+        # Game Mode Column
+        ttk.Label(settings_container, text="🎮 Game Mode", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        
+        ttk.Label(settings_container, text="Brightness").grid(row=1, column=0, sticky="w", pady=5)
+        self.game_bri = ttk.Spinbox(settings_container, from_=0, to=100, width=8)
+        self.game_bri.grid(row=1, column=1, sticky="w", padx=10)
+
+        ttk.Label(settings_container, text="Contrast").grid(row=2, column=0, sticky="w", pady=5)
+        self.game_con = ttk.Spinbox(settings_container, from_=0, to=100, width=8)
+        self.game_con.grid(row=2, column=1, sticky="w", padx=10)
+
+        # Divider
+        ttk.Separator(settings_container, orient="vertical").grid(row=0, column=2, rowspan=3, sticky="ns", padx=20)
+
+        # Desktop Mode Column
+        ttk.Label(settings_container, text="🖥️ Desktop Mode", font=("Segoe UI", 11, "bold")).grid(row=0, column=3, columnspan=2, sticky="w", pady=(0, 10))
+
+        ttk.Label(settings_container, text="Brightness").grid(row=1, column=3, sticky="w", pady=5)
+        self.desk_bri = ttk.Spinbox(settings_container, from_=0, to=100, width=8)
+        self.desk_bri.grid(row=1, column=4, sticky="w", padx=10)
+
+        ttk.Label(settings_container, text="Contrast").grid(row=2, column=3, sticky="w", pady=5)
+        self.desk_con = ttk.Spinbox(settings_container, from_=0, to=100, width=8)
+        self.desk_con.grid(row=2, column=4, sticky="w", padx=10)
+
+        # --- Footer ---
+        footer_frame = ttk.Frame(self)
+        footer_frame.pack(fill="x", pady=10)
+
+        save_btn = ttk.Button(footer_frame, text="Save Configuration", command=self.save_settings, style="Accent.TButton")
+        save_btn.pack(side="right")
+        
+        reload_btn = ttk.Button(footer_frame, text="Discard Changes", command=self.refresh_ui)
+        reload_btn.pack(side="right", padx=10)
 
         self.refresh_ui()
 
@@ -95,18 +121,14 @@ class ConfigApp:
             self.proc_listbox.insert(tk.END, p)
         
         # Settings
-        self.game_bri.delete(0, tk.END)
-        self.game_bri.insert(0, str(self.config["game_mode"]["brightness"]))
-        self.game_con.delete(0, tk.END)
-        self.game_con.insert(0, str(self.config["game_mode"]["contrast"]))
+        self.game_bri.set(self.config["game_mode"]["brightness"])
+        self.game_con.set(self.config["game_mode"]["contrast"])
 
-        self.desk_bri.delete(0, tk.END)
-        self.desk_bri.insert(0, str(self.config["desktop_mode"]["brightness"]))
-        self.desk_con.delete(0, tk.END)
-        self.desk_con.insert(0, str(self.config["desktop_mode"]["contrast"]))
+        self.desk_bri.set(self.config["desktop_mode"]["brightness"])
+        self.desk_con.set(self.config["desktop_mode"]["contrast"])
 
     def add_process(self):
-        new_proc = simpledialog.askstring("Add Process", "Enter process name (e.g. game.exe):")
+        new_proc = simpledialog.askstring("Add Process", "Enter process name (e.g. game.exe):", parent=self.root)
         if new_proc:
             if new_proc not in self.config["game_processes"]:
                 self.config["game_processes"].append(new_proc)
@@ -118,7 +140,7 @@ class ConfigApp:
             return
         idx = sel[0]
         proc = self.proc_listbox.get(idx)
-        if messagebox.askyesno("Confirm", f"Remove '{proc}'?"):
+        if messagebox.askyesno("Confirm", f"Remove '{proc}'?", parent=self.root):
             self.config["game_processes"].remove(proc)
             self.refresh_ui()
 
@@ -132,7 +154,7 @@ class ConfigApp:
             
             save_config(self.config)
         except ValueError:
-            messagebox.showerror("Error", "Brightness and Contrast must be integers (0-100).")
+            messagebox.showerror("Error", "Brightness and Contrast must be integers (0-100).", parent=self.root)
 
 if __name__ == "__main__":
     root = tk.Tk()

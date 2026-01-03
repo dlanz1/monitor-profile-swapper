@@ -1,3 +1,4 @@
 monitorcontrol
 psutil
 pyinstaller
+sv-ttk
