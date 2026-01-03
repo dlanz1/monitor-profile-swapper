@@ -18,6 +18,20 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+def safe_extract(zip_ref, target_dir):
+    """
+    Extracts files from a zip archive to a target directory,
+    ensuring that no files are extracted outside the target directory.
+    """
+    target_dir = os.path.abspath(target_dir)
+    for member in zip_ref.infolist():
+        member_path = os.path.abspath(os.path.join(target_dir, member.filename))
+        # Prevent partial path traversal (e.g., /tmp/test matching /tmp/test_hack)
+        if not os.path.commonpath([target_dir]) == os.path.commonpath([target_dir, member_path]):
+             raise Exception(f"Attempted path traversal in zip file: {member.filename}")
+
+    zip_ref.extractall(target_dir)
+
 def check_for_updates():
     """
     Checks GitHub Releases for a version newer than CURRENT_VERSION.
@@ -86,7 +100,7 @@ def perform_update(release_data):
         os.makedirs(extract_folder)
         
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(extract_folder)
+            safe_extract(zip_ref, extract_folder)
     except Exception as e:
         print(f"   Extraction failed: {e}")
         return False
