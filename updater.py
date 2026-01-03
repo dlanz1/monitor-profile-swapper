@@ -5,6 +5,7 @@ import subprocess
 import zipfile
 import shutil
 import stat
+import time
 from packaging import version
 
 # Current version of the application
