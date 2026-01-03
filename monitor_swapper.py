@@ -11,7 +11,15 @@ import hdr_control
 import pystray
 from PIL import Image, ImageDraw
 
-CONFIG_FILE = "config.json"
+if getattr(sys, 'frozen', False):
+    # Running as compiled exe
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    # Running as script
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
+
 DEFAULT_CONFIG = {
     "game_processes": ["EscapeFromTarkov.exe", "EscapeFromTarkov_BE.exe", "TarkovArena.exe"],
     "game_mode": {"brightness": 80, "contrast": 80, "hdr_enabled": False},
