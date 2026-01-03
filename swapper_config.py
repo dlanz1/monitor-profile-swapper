@@ -11,7 +11,7 @@ CONFIG_FILE = "config.json"
 
 DEFAULT_CONFIG = {
     "game_processes": ["EscapeFromTarkov.exe", "EscapeFromTarkov_BE.exe", "TarkovArena.exe"],
-    "game_mode": {"brightness": 80, "contrast": 80},
+    "game_mode": {"brightness": 80, "contrast": 80, "hdr_enabled": False},
     "desktop_mode": {"brightness": 50, "contrast": 50}
 }
 
@@ -95,8 +95,13 @@ class ConfigApp(ttk.Frame):
         self.game_con = ttk.Spinbox(settings_container, from_=0, to=100, width=8)
         self.game_con.grid(row=2, column=1, sticky="w", padx=10)
 
+        # HDR Checkbox
+        self.hdr_var = tk.BooleanVar()
+        self.hdr_chk = ttk.Checkbutton(settings_container, text="Enable HDR", variable=self.hdr_var)
+        self.hdr_chk.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+
         # Divider
-        ttk.Separator(settings_container, orient="vertical").grid(row=0, column=2, rowspan=3, sticky="ns", padx=20)
+        ttk.Separator(settings_container, orient="vertical").grid(row=0, column=2, rowspan=4, sticky="ns", padx=20)
 
         # Desktop Mode Column
         desk_header_frame = ttk.Frame(settings_container)
@@ -146,6 +151,7 @@ class ConfigApp(ttk.Frame):
         # Settings
         self.game_bri.set(self.config["game_mode"]["brightness"])
         self.game_con.set(self.config["game_mode"]["contrast"])
+        self.hdr_var.set(self.config["game_mode"].get("hdr_enabled", False))
 
         self.desk_bri.set(self.config["desktop_mode"]["brightness"])
         self.desk_con.set(self.config["desktop_mode"]["contrast"])
@@ -210,6 +216,7 @@ class ConfigApp(ttk.Frame):
         try:
             self.config["game_mode"]["brightness"] = int(self.game_bri.get())
             self.config["game_mode"]["contrast"] = int(self.game_con.get())
+            self.config["game_mode"]["hdr_enabled"] = self.hdr_var.get()
             self.config["desktop_mode"]["brightness"] = int(self.desk_bri.get())
             self.config["desktop_mode"]["contrast"] = int(self.desk_con.get())
             self.config["game_processes"] = list(self.proc_listbox.get(0, tk.END))

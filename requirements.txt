@@ -5,3 +5,4 @@ sv-ttk
 darkdetect
 requests
 packaging
+pyautogui

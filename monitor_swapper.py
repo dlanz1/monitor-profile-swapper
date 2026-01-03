@@ -5,11 +5,12 @@ import os
 import sys
 from monitorcontrol import get_monitors
 import updater
+import hdr_control
 
 CONFIG_FILE = "config.json"
 DEFAULT_CONFIG = {
     "game_processes": ["EscapeFromTarkov.exe", "EscapeFromTarkov_BE.exe", "TarkovArena.exe"],
-    "game_mode": {"brightness": 80, "contrast": 80},
+    "game_mode": {"brightness": 80, "contrast": 80, "hdr_enabled": False},
     "desktop_mode": {"brightness": 50, "contrast": 50}
 }
 
@@ -67,15 +68,23 @@ def main():
     game_mode = config.get("game_mode", {})
     desktop_mode = config.get("desktop_mode", {})
     
+    # Reload HDR preference
+    hdr_in_game = game_mode.get("hdr_enabled", False)
+    
     print(f"Monitoring for: {game_processes}")
     print(f"Game Mode: {game_mode}")
     print(f"Desktop Mode: {desktop_mode}")
+    print(f"HDR in Game: {hdr_in_game}")
     
     in_game_mode = False
     
     # Apply Desktop Mode on startup ensuring consistent state
     print("Applying Desktop settings on startup...")
     set_monitor(desktop_mode.get("brightness", 50), desktop_mode.get("contrast", 50))
+    # Ensure HDR is OFF for desktop if configured for game, or just rely on Windows default?
+    # Strategy: Only enforce HDR ON during game. Enforce HDR OFF when leaving game.
+    if hdr_in_game:
+        hdr_control.set_hdr_mode(False) # Start with HDR Off if we manage it
 
     while True:
         is_running = check_process(game_processes)
@@ -84,12 +93,24 @@ def main():
         if is_running and not in_game_mode:
             print("DETECTED LAUNCH! Switching to Game settings...")
             if set_monitor(game_mode.get("brightness", 80), game_mode.get("contrast", 80)):
-                in_game_mode = True
+                pass # Monitor settings applied
+            
+            # HDR Logic
+            if hdr_in_game:
+                hdr_control.set_hdr_mode(True)
+
+            in_game_mode = True
         
         elif not is_running and in_game_mode:
             print("DETECTED CLOSE. Restoring Desktop settings...")
             if set_monitor(desktop_mode.get("brightness", 50), desktop_mode.get("contrast", 50)):
-                in_game_mode = False
+                pass
+            
+            # HDR Logic
+            if hdr_in_game:
+                hdr_control.set_hdr_mode(False)
+
+            in_game_mode = False
         
         # Optional: Periodic config reload check could go here
         
