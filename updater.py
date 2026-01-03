@@ -7,7 +7,7 @@ import shutil
 from packaging import version
 
 # Current version of the application
-CURRENT_VERSION = "v1.4.1"
+CURRENT_VERSION = "v1.4.2"
 
 # GitHub Repository details
 REPO_OWNER = "dlanz1"
@@ -98,35 +98,52 @@ def perform_update(release_data):
         return True
 
     print("   Scheduling restart...")
-    # Use /D to ensure we stay in the right drive, and use absolute paths
-    # CRITICAL: We MUST clear _MEIPASS environment variable. 
-    # We remove /i so the start command inherits our cleaned environment.
+    
+    exe_path = sys.executable
+    settings_path = os.path.join(BASE_DIR, "Settings.exe")
+    log_path = os.path.join(BASE_DIR, "update_log.txt")
+    
+    # We move the batch script to TEMP so it's not in the path of robocopy
+    temp_dir = os.environ.get("TEMP", os.environ.get("TMP", BASE_DIR))
+    bat_path = os.path.join(temp_dir, "monitor_swapper_updater.bat")
+
+    # CRITICAL: We clear all MEI related variables. 
+    # Using 'start /i' or a fresh 'cmd /c' helps ensure environment isolation.
     batch_script = f"""
 @echo off
+echo [{time.ctime()}] Starting update... > "{log_path}"
 echo Finalizing update...
 taskkill /F /IM MonitorSwapper.exe /T > NUL 2>&1
 taskkill /F /IM Settings.exe /T > NUL 2>&1
 timeout /t 3 /nobreak > NUL
+
 echo Updating files in {BASE_DIR}...
+echo [{time.ctime()}] Running robocopy... >> "{log_path}"
 cd /d "{BASE_DIR}"
-robocopy "{extract_folder}" "{BASE_DIR}" /E /IS /IT /NP /R:3 /W:5 > NUL
+robocopy "{extract_folder}" "{BASE_DIR}" /E /IS /IT /NP /R:3 /W:5 >> "{log_path}"
+
 if %errorlevel% geq 8 (
-    echo Update failed! Please close any open Monitor Swapper windows and try again.
+    echo Update failed! Check update_log.txt
+    echo [{time.ctime()}] Robocopy failed with exit code %errorlevel% >> "{log_path}"
     pause
     exit
 )
+
 echo Cleaning up...
 rmdir /S /Q "{extract_folder}"
 del "{zip_path}"
-echo Restarting...
+
+echo Restarting application...
+echo [{time.ctime()}] Restarting MonitorSwapper... >> "{log_path}"
 set _MEIPASS=
 set _MEI=
-start "" "{exe_name}"
-start "" "Settings.exe"
+start "" "{exe_path}"
+start "" "{settings_path}"
+
+echo [{time.ctime()}] Update process finished. >> "{log_path}"
 del "%~f0"
 """
     
-    bat_path = os.path.join(BASE_DIR, "update_runner.bat")
     with open(bat_path, "w") as f:
         f.write(batch_script)
 
