@@ -200,7 +200,7 @@ def main():
         menu = pystray.Menu(
             pystray.MenuItem("Monitor Swapper", None, enabled=False),
             pystray.MenuItem("Settings", open_settings, default=True),
-            pystray.MenuItem("Check for updates", manual_update_check),
+            pystray.MenuItem(f"Check for updates ({updater.CURRENT_VERSION})", manual_update_check),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit", quit_app)
         )
