@@ -6,6 +6,8 @@ import sys
 import threading
 import subprocess
 import ctypes
+import winreg
+import webbrowser
 from monitorcontrol import get_monitors
 import updater
 import hdr_control
@@ -30,6 +32,73 @@ DEFAULT_CONFIG = {
 
 # Global flag to stop threads
 stop_event = threading.Event()
+
+def check_vcredist_installed():
+    """
+    Check if Visual C++ Redistributable 2015-2022 (x64) is installed.
+    Returns True if found, False otherwise.
+    """
+    registry_paths = [
+        # VC++ 2015-2022 x64 (various versions)
+        r"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+        r"SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+    ]
+    
+    for path in registry_paths:
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
+            installed, _ = winreg.QueryValueEx(key, "Installed")
+            winreg.CloseKey(key)
+            if installed == 1:
+                return True
+        except (FileNotFoundError, OSError):
+            continue
+    
+    # Alternative check: look for the DLL directly
+    try:
+        ctypes.WinDLL("vcruntime140.dll")
+        return True
+    except OSError:
+        pass
+    
+    return False
+
+def prompt_vcredist_install():
+    """
+    Show a message box prompting the user to install VC++ Redistributable.
+    Returns True if user wants to continue anyway, False to exit.
+    """
+    MB_YESNO = 0x04
+    MB_ICONWARNING = 0x30
+    IDYES = 6
+    
+    message = (
+        "Microsoft Visual C++ Redistributable is not detected on your system.\n\n"
+        "This is required for Monitor Profile Swapper to work correctly.\n\n"
+        "Would you like to open the download page?\n\n"
+        "(Click 'Yes' to open the download page, 'No' to try running anyway)"
+    )
+    
+    result = ctypes.windll.user32.MessageBoxW(
+        0, message, "Missing Dependency", MB_YESNO | MB_ICONWARNING
+    )
+    
+    if result == IDYES:
+        # Open the official Microsoft download page
+        webbrowser.open("https://aka.ms/vs/17/release/vc_redist.x64.exe")
+        
+        # Show follow-up message
+        MB_OK = 0x00
+        MB_ICONINFORMATION = 0x40
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "After installing the Visual C++ Redistributable, please restart Monitor Profile Swapper.",
+            "Installation Required",
+            MB_OK | MB_ICONINFORMATION
+        )
+        return False  # Exit the app
+    
+    return True  # User chose to continue anyway
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -202,6 +271,15 @@ def manual_update_check(icon, item):
     threading.Thread(target=run_check, daemon=True).start()
 
 def main():
+    # --- VC++ Redistributable Check ---
+    if not check_vcredist_installed():
+        print("VC++ Redistributable not found!")
+        if not prompt_vcredist_install():
+            print("Exiting - user chose to install VC++ Redistributable first.")
+            sys.exit(0)
+        print("User chose to continue without VC++ Redistributable.")
+    # ----------------------------------
+
     # --- Auto-Update Check ---
     update_data = updater.check_for_updates()
     if update_data:
