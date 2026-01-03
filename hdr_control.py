@@ -1,17 +1,17 @@
 import ctypes
-from ctypes import wintypes
+from ctypes import wintypes, Structure
 import pyautogui
 import time
 
 # --- Windows API Definitions for HDR Reading ---
 
-class LUID(wintypes.Structure):
+class LUID(Structure):
     _fields_ = [("LowPart", wintypes.DWORD), ("HighPart", wintypes.LONG)]
 
 DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME = 2
 DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO = 8
 
-class DISPLAYCONFIG_DEVICE_INFO_HEADER(wintypes.Structure):
+class DISPLAYCONFIG_DEVICE_INFO_HEADER(Structure):
     _fields_ = [
         ("type", wintypes.UINT),
         ("size", wintypes.UINT),
@@ -19,7 +19,7 @@ class DISPLAYCONFIG_DEVICE_INFO_HEADER(wintypes.Structure):
         ("id", wintypes.UINT)
     ]
 
-class DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO(wintypes.Structure):
+class DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO(Structure):
     _fields_ = [
         ("header", DISPLAYCONFIG_DEVICE_INFO_HEADER),
         ("value", wintypes.UINT),
@@ -29,10 +29,10 @@ class DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO(wintypes.Structure):
         ("wideColorGamutEnabled", wintypes.BOOL)
     ]
 
-class DISPLAYCONFIG_PATH_INFO(wintypes.Structure):
+class DISPLAYCONFIG_PATH_INFO(Structure):
     _fields_ = [("sourceInfo", wintypes.UINT * 4), ("targetInfo", wintypes.UINT * 4)]
 
-class DISPLAYCONFIG_MODE_INFO(wintypes.Structure):
+class DISPLAYCONFIG_MODE_INFO(Structure):
     _fields_ = [("infoType", wintypes.UINT), ("id", wintypes.UINT), ("adapterId", LUID), ("targetMode", wintypes.UINT * 4)]
 
 QDC_ONLY_ACTIVE_PATHS = 0x00000002
