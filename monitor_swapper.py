@@ -161,10 +161,10 @@ def main():
         print("Starting System Tray Icon...")
         menu = pystray.Menu(
             pystray.MenuItem("Monitor Swapper", None, enabled=False),
-            pystray.MenuItem("Settings", open_settings),
+            pystray.MenuItem("Settings", open_settings, default=True),
             pystray.MenuItem("Exit", quit_app)
         )
-        icon = pystray.Icon("MonitorSwapper", create_icon(), "Monitor Swapper", menu)
+        icon = pystray.Icon("MonitorSwapper", create_icon(), "Monitor Swapper", menu, action=open_settings)
         icon.run()
     else:
         print("Tray icon disabled. Running in console mode.")
