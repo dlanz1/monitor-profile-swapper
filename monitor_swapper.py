@@ -146,23 +146,35 @@ def quit_app(icon, item):
     os._exit(0)
 
 def manual_update_check(icon, item):
-    # Use standard Windows MessageBox for feedback
-    MB_OK = 0x0
-    MB_YESNO = 0x4
-    MB_ICONINFO = 0x40
-    MB_ICONQUESTION = 0x20
-    IDYES = 6
+    def run_check():
+        # Use standard Windows MessageBox for feedback
+        MB_OK = 0x0
+        MB_YESNO = 0x4
+        MB_ICONINFO = 0x40
+        MB_ICONQUESTION = 0x20
+        MB_TOPMOST = 0x40000
+        MB_SETFOREGROUND = 0x10000
+        IDYES = 6
 
-    update_data = updater.check_for_updates()
-    if update_data:
-        new_ver = update_data.get("tag_name", "Unknown")
-        msg = f"A new update ({new_ver}) is available. Would you like to install it now?\n\nThe application will restart automatically."
-        res = ctypes.windll.user32.MessageBoxW(0, msg, "Update Available", MB_YESNO | MB_ICONQUESTION)
-        
-        if res == IDYES:
-            updater.perform_update(update_data)
-    else:
-        ctypes.windll.user32.MessageBoxW(0, "You are already running the latest version.", "No Updates Found", MB_OK | MB_ICONINFO)
+        try:
+            update_data = updater.check_for_updates()
+            if update_data:
+                new_ver = update_data.get("tag_name", "Unknown")
+                msg = f"A new update ({new_ver}) is available. Would you like to install it now?\n\nThe application will restart automatically."
+                res = ctypes.windll.user32.MessageBoxW(0, msg, "Update Available", 
+                                                       MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND)
+                
+                if res == IDYES:
+                    updater.perform_update(update_data)
+            else:
+                ctypes.windll.user32.MessageBoxW(0, "You are already running the latest version.", "No Updates Found", 
+                                                 MB_OK | MB_ICONINFO | MB_TOPMOST | MB_SETFOREGROUND)
+        except Exception as e:
+            ctypes.windll.user32.MessageBoxW(0, f"Update check failed: {e}", "Error", 
+                                             MB_OK | 0x10 | MB_TOPMOST | MB_SETFOREGROUND)
+
+    # Run check in a background thread so the tray menu doesn't hang
+    threading.Thread(target=run_check, daemon=True).start()
 
 def main():
     # --- Auto-Update Check ---
