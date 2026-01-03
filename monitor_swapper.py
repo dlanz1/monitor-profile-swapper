@@ -107,7 +107,8 @@ def monitoring_loop():
                     print(f"HDR setting changed to {new_hdr_in_game}. Applying immediately in game mode...")
                     hdr_control.set_hdr_mode(new_hdr_in_game)
                 else:
-                    # We're in desktop mode - if HDR is now enabled for game mode, ensure it's off in desktop
+                    # We're in desktop mode - HDR should be off when HDR management is enabled
+                    # Only update if the new setting enables HDR (meaning we need to ensure it's off)
                     if new_hdr_in_game:
                         print(f"HDR setting changed to {new_hdr_in_game}. Ensuring HDR is off in desktop mode...")
                         hdr_control.set_hdr_mode(False)
