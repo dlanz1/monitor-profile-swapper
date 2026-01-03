@@ -70,6 +70,18 @@ python build.py
 *   **DDC/CI Enabled Monitor**: Ensure "DDC/CI" is turned **ON** in your physical monitor's OSD menu.
 *   **Windows OS**: Currently supports Windows due to DDC/CI library dependencies.
 
+## 🖥️ Hardware Compatibility
+
+This tool relies on the **DDC/CI** standard to communicate with your display.
+
+*   ✅ **Supported**: Most modern external PC monitors (connected via DisplayPort, HDMI, or DVI).
+*   ❌ **Likely Unsupported**:
+    *   **Laptop Screens**: Internal displays usually use different control methods and are not supported by this tool.
+    *   **TVs**: Many televisions do not support DDC/CI over HDMI.
+    *   **DisplayLink Docks**: Some USB docking stations may block DDC/CI signals.
+
+If the tool runs but settings don't change, check your cable connection and ensure DDC/CI is enabled in your monitor's on-screen menu.
+
 ---
 
 ## 🛠️ Configuration
