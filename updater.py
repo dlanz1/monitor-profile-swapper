@@ -10,7 +10,7 @@ import re
 from packaging import version
 
 # Current version of the application
-CURRENT_VERSION = "v1.4.4"
+CURRENT_VERSION = "v1.4.5"
 
 # GitHub Repository details
 REPO_OWNER = "dlanz1"
