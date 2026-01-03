@@ -391,6 +391,10 @@ def main():
     prompt_startup_option()
     # ---------------------------------------
 
+    # --- Clean up any leftover update artifacts ---
+    updater.cleanup_update_artifacts()
+    # ----------------------------------------------
+
     # --- Auto-Update Check ---
     update_data = updater.check_for_updates()
     if update_data:

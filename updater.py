@@ -4,19 +4,63 @@ import sys
 import subprocess
 import zipfile
 import shutil
+import time
+import stat
+import re
 from packaging import version
 
 # Current version of the application
-CURRENT_VERSION = "v1.4.3"
+CURRENT_VERSION = "v1.4.4"
 
 # GitHub Repository details
 REPO_OWNER = "dlanz1"
 REPO_NAME = "monitor-profile-swapper"
 
 if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(sys.executable)
+    BASE_DIR = os.path.dirname(os.path.realpath(sys.executable))
 else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    BASE_DIR = os.path.dirname(os.path.realpath(os.path.abspath(__file__)))
+
+def _remove_readonly(func, path, excinfo):
+    """Error handler for shutil.rmtree to handle read-only files on Windows."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+def _escape_batch_path(path):
+    """Escape special characters in paths for batch script safety."""
+    # Replace problematic batch characters
+    return path.replace('%', '%%')
+
+def cleanup_update_artifacts():
+    """
+    Removes leftover update files from a previous update attempt.
+    Call this at startup to ensure no stale files remain if the batch script failed.
+    """
+    zip_path = os.path.join(BASE_DIR, "update_pkg.zip")
+    extract_folder = os.path.join(BASE_DIR, "update_tmp")
+    
+    zip_cleaned = False
+    folder_cleaned = False
+    
+    # Clean up ZIP file
+    if os.path.exists(zip_path):
+        try:
+            os.remove(zip_path)
+            print(f"   Cleaned up leftover update archive: {zip_path}")
+            zip_cleaned = True
+        except Exception as e:
+            print(f"   Warning: Failed to clean update archive: {e}")
+    
+    # Clean up extract folder
+    if os.path.exists(extract_folder):
+        try:
+            shutil.rmtree(extract_folder, onerror=_remove_readonly)
+            print(f"   Cleaned up leftover update folder: {extract_folder}")
+            folder_cleaned = True
+        except Exception as e:
+            print(f"   Warning: Failed to clean update folder: {e}")
+    
+    return zip_cleaned or folder_cleaned
 
 def check_for_updates():
     """
@@ -27,20 +71,37 @@ def check_for_updates():
     try:
         url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest"
         response = requests.get(url, timeout=5)
+        
+        # Handle rate limiting
+        if response.status_code == 403:
+            remaining = response.headers.get('X-RateLimit-Remaining', 'unknown')
+            if remaining == '0':
+                reset_time = response.headers.get('X-RateLimit-Reset', '')
+                print(f"   Update check skipped: GitHub API rate limit exceeded.")
+                return None
+        
         if response.status_code != 200:
             print(f"   Update check failed: HTTP {response.status_code}")
             return None
             
         data = response.json()
-        latest_tag = data["tag_name"]
+        latest_tag = data.get("tag_name", "")
+        
+        if not latest_tag:
+            print("   Update check failed: No tag_name in release data.")
+            return None
         
         # Clean versions for comparison (remove 'v')
         curr_ver_clean = CURRENT_VERSION.lstrip('v')
         latest_ver_clean = latest_tag.lstrip('v')
 
-        if version.parse(latest_ver_clean) > version.parse(curr_ver_clean):
-            print(f"   >>> Update Found: {latest_tag}")
-            return data
+        try:
+            if version.parse(latest_ver_clean) > version.parse(curr_ver_clean):
+                print(f"   >>> Update Found: {latest_tag}")
+                return data
+        except Exception as ve:
+            print(f"   Warning: Could not parse version '{latest_tag}': {ve}")
+            return None
         
         print("   Up to date.")
         return None
@@ -55,24 +116,59 @@ def perform_update(release_data):
     """
     print(f"Initializing update to {release_data['tag_name']}...")
     
-    # 1. Find the correct asset (.zip)
+    # 1. Find the correct asset (.zip) - prefer "Release.zip" or similar named packages
     asset_url = None
+    asset_name = None
+    fallback_url = None
+    fallback_name = None
+    
     for asset in release_data.get("assets", []):
-        if asset["name"].endswith(".zip"):
-            asset_url = asset["browser_download_url"]
-            break
+        name = asset.get("name", "")
+        if name.endswith(".zip"):
+            # Prefer Release.zip or monitor-profile-swapper*.zip over generic zips
+            if "release" in name.lower() or REPO_NAME.lower() in name.lower():
+                asset_url = asset["browser_download_url"]
+                asset_name = name
+                break
+            elif fallback_url is None:
+                # Store first .zip as fallback
+                fallback_url = asset["browser_download_url"]
+                fallback_name = name
+    
+    # Use fallback if no preferred asset found
+    if not asset_url and fallback_url:
+        asset_url = fallback_url
+        asset_name = fallback_name
     
     if not asset_url:
         print("   Error: No .zip asset found in release.")
         return False
+    
+    print(f"   Found update package: {asset_name}")
 
     # 2. Download the zip
     zip_path = os.path.join(BASE_DIR, "update_pkg.zip")
     try:
         print(f"   Downloading update package to {zip_path}...")
-        r = requests.get(asset_url, stream=True)
+        r = requests.get(asset_url, stream=True, timeout=60)
+        r.raise_for_status()  # Raise exception for HTTP errors
+        
         with open(zip_path, 'wb') as f:
             shutil.copyfileobj(r.raw, f)
+        
+        # Verify the downloaded file is a valid ZIP
+        if not zipfile.is_zipfile(zip_path):
+            print("   Error: Downloaded file is not a valid ZIP archive.")
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+            return False
+            
+    except requests.exceptions.HTTPError as e:
+        print(f"   Download failed: HTTP {e.response.status_code}")
+        return False
+    except requests.exceptions.Timeout:
+        print("   Download failed: Connection timed out.")
+        return False
     except Exception as e:
         print(f"   Download failed: {e}")
         return False
@@ -82,11 +178,14 @@ def perform_update(release_data):
     try:
         print("   Extracting files...")
         if os.path.exists(extract_folder):
-            shutil.rmtree(extract_folder)
+            shutil.rmtree(extract_folder, onerror=_remove_readonly)
         os.makedirs(extract_folder)
         
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_folder)
+    except zipfile.BadZipFile:
+        print("   Extraction failed: Corrupt or invalid ZIP file.")
+        return False
     except Exception as e:
         print(f"   Extraction failed: {e}")
         return False
@@ -95,58 +194,92 @@ def perform_update(release_data):
     exe_name = os.path.basename(sys.executable)
     if not getattr(sys, 'frozen', False):
         print("   [DEV] Running from source: Auto-update simulation complete.")
+        # Clean up downloaded archive and temp folder in dev mode
+        try:
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+            if os.path.exists(extract_folder):
+                shutil.rmtree(extract_folder, onerror=_remove_readonly)
+        except Exception as e:
+            print(f"   [DEV] Cleanup warning: {e}")
         return True
 
     print("   Scheduling restart...")
     
     exe_path = sys.executable
     settings_path = os.path.join(BASE_DIR, "Settings.exe")
+    settings_exists = os.path.exists(settings_path)
     log_path = os.path.join(BASE_DIR, "update_log.txt")
+    
+    # Escape paths for batch script safety
+    exe_path_safe = _escape_batch_path(exe_path)
+    settings_path_safe = _escape_batch_path(settings_path)
+    log_path_safe = _escape_batch_path(log_path)
+    base_dir_safe = _escape_batch_path(BASE_DIR)
+    extract_folder_safe = _escape_batch_path(extract_folder)
+    zip_path_safe = _escape_batch_path(zip_path)
+    
+    # Get current timestamp for logging
+    timestamp = time.ctime()
     
     # We move the batch script to TEMP so it's not in the path of robocopy
     temp_dir = os.environ.get("TEMP", os.environ.get("TMP", BASE_DIR))
     bat_path = os.path.join(temp_dir, "monitor_swapper_updater.bat")
 
+    # Build Settings.exe launch command conditionally
+    settings_launch = f'start "" "{settings_path_safe}"' if settings_exists else 'REM Settings.exe not found, skipping'
+
     # CRITICAL: We clear all MEI related variables. 
     # Using 'start /i' or a fresh 'cmd /c' helps ensure environment isolation.
-    batch_script = f"""
-@echo off
-echo [{time.ctime()}] Starting update... > "{log_path}"
+    batch_script = f"""@echo off
+echo [{timestamp}] Starting update... > "{log_path_safe}"
 echo Finalizing update...
-taskkill /F /IM MonitorSwapper.exe /T > NUL 2>&1
+taskkill /F /IM "{exe_name}" /T > NUL 2>&1
 taskkill /F /IM Settings.exe /T > NUL 2>&1
 timeout /t 3 /nobreak > NUL
 
-echo Updating files in {BASE_DIR}...
-echo [{time.ctime()}] Running robocopy... >> "{log_path}"
-cd /d "{BASE_DIR}"
-robocopy "{extract_folder}" "{BASE_DIR}" /E /IS /IT /NP /R:3 /W:5 >> "{log_path}"
+echo Updating files in {base_dir_safe}...
+echo [{timestamp}] Running robocopy... >> "{log_path_safe}"
+cd /d "{base_dir_safe}"
+robocopy "{extract_folder_safe}" "{base_dir_safe}" /E /IS /IT /NP /R:3 /W:5 >> "{log_path_safe}"
 
-if %errorlevel% geq 8 (
+set ROBO_EXIT=%%errorlevel%%
+echo [{timestamp}] Robocopy exit code: %%ROBO_EXIT%% >> "{log_path_safe}"
+
+if %%ROBO_EXIT%% geq 8 (
     echo Update failed! Check update_log.txt
-    echo [{time.ctime()}] Robocopy failed with exit code %errorlevel% >> "{log_path}"
+    echo [{timestamp}] Robocopy failed with exit code %%ROBO_EXIT%% >> "{log_path_safe}"
     pause
-    exit
+    exit /b 1
 )
 
 echo Cleaning up...
-rmdir /S /Q "{extract_folder}"
-del "{zip_path}"
+rmdir /S /Q "{extract_folder_safe}" 2>NUL
+del "{zip_path_safe}" 2>NUL
 
 echo Restarting application...
-echo [{time.ctime()}] Restarting MonitorSwapper... >> "{log_path}"
+echo [{timestamp}] Restarting MonitorSwapper... >> "{log_path_safe}"
 set _MEIPASS=
 set _MEI=
-start "" "{exe_path}"
-start "" "{settings_path}"
+start "" "{exe_path_safe}"
+{settings_launch}
 
-echo [{time.ctime()}] Update process finished. >> "{log_path}"
-del "%~f0"
+echo [{timestamp}] Update process finished. >> "{log_path_safe}"
+(goto) 2>nul & del "%%~f0"
 """
     
-    with open(bat_path, "w") as f:
-        f.write(batch_script)
+    try:
+        with open(bat_path, "w") as f:
+            f.write(batch_script)
+    except Exception as e:
+        print(f"   Error: Failed to create update script: {e}")
+        return False
 
     # 5. Launch Batch and Exit
-    os.startfile(bat_path)
+    try:
+        os.startfile(bat_path)
+    except Exception as e:
+        print(f"   Error: Failed to launch update script: {e}")
+        return False
+    
     sys.exit(0)
