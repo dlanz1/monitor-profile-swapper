@@ -15,7 +15,7 @@ Perfect for games like *Escape from Tarkov* where higher visibility is crucial, 
 ## 📸 Preview
 
 **Modern Windows 11 GUI**
-![Settings Preview](docs/gui_preview.png)
+![Settings Preview](docs/gui_v140.png)
 
 ---
 
