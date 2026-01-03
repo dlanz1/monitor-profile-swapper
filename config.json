@@ -1,0 +1,15 @@
+{
+    "game_processes": [
+        "EscapeFromTarkov.exe",
+        "EscapeFromTarkov_BE.exe",
+        "TarkovArena.exe"
+    ],
+    "game_mode": {
+        "brightness": 100,
+        "contrast": 80
+    },
+    "desktop_mode": {
+        "brightness": 40,
+        "contrast": 50
+    }
+}

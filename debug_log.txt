@@ -1,0 +1,19 @@
+[2026-01-02 04:23:54.229523] Script started.
+[2026-01-02 04:24:09.235984] Found process: EscapeFromTarkov_BE.exe
+[2026-01-02 04:24:09.236287] Found process: EscapeFromTarkov.exe
+[2026-01-02 04:24:09.236949] Game DETECTED. Switching to FPS...
+[2026-01-02 04:24:09.237946] Setting B:79 C:80
+[2026-01-02 04:24:14.361287] Found process: EscapeFromTarkov_BE.exe
+[2026-01-02 04:24:14.361570] Found process: EscapeFromTarkov.exe
+[2026-01-02 04:24:19.363155] Found process: EscapeFromTarkov_BE.exe
+[2026-01-02 04:24:19.363449] Found process: EscapeFromTarkov.exe
+[2026-01-02 04:24:24.364765] Found process: EscapeFromTarkov_BE.exe
+[2026-01-02 04:24:24.365760] Found process: EscapeFromTarkov.exe
+[2026-01-02 04:24:29.367310] Found process: EscapeFromTarkov_BE.exe
+[2026-01-02 04:24:29.367590] Found process: EscapeFromTarkov.exe
+[2026-01-02 04:24:34.368785] Found process: EscapeFromTarkov_BE.exe
+[2026-01-02 04:24:34.369124] Found process: EscapeFromTarkov.exe
+[2026-01-02 04:24:39.370946] Found process: EscapeFromTarkov_BE.exe
+[2026-01-02 04:24:39.371285] Found process: EscapeFromTarkov.exe
+[2026-01-02 04:24:44.372738] Game CLOSED. Reverting...
+[2026-01-02 04:24:44.373138] Setting B:75 C:75
