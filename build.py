@@ -20,7 +20,7 @@ def main():
         shutil.rmtree("Release")
 
     print("Building MonitorSwapper...")
-    run_command("pyinstaller --noconfirm --onefile --console --name MonitorSwapper --hidden-import=pyautogui --hidden-import=pystray --hidden-import=PIL monitor_swapper.py")
+    run_command("pyinstaller --noconfirm --onefile --windowed --name MonitorSwapper --hidden-import=pyautogui --hidden-import=pystray --hidden-import=PIL monitor_swapper.py")
 
     print("Building Settings GUI...")
     run_command("pyinstaller --noconfirm --onefile --windowed --name Settings --hidden-import=sv_ttk --hidden-import=darkdetect swapper_config.py")

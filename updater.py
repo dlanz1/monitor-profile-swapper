@@ -7,7 +7,7 @@ import shutil
 from packaging import version
 
 # Current version of the application
-CURRENT_VERSION = "v1.3.1"
+CURRENT_VERSION = "v1.3.2"
 
 # GitHub Repository details
 REPO_OWNER = "dlanz1"
@@ -99,6 +99,7 @@ def perform_update(release_data):
 
     print("   Scheduling restart...")
     # Use /D to ensure we stay in the right drive, and use absolute paths
+    # We launch Settings.exe as well so the user knows it's back up
     batch_script = f"""
 @echo off
 echo Waiting for application to close...
@@ -116,6 +117,7 @@ rmdir /S /Q "{extract_folder}"
 del "{zip_path}"
 echo Restarting application...
 start "" "{exe_name}"
+start "" "Settings.exe"
 del "%~f0"
 """
     
@@ -124,5 +126,5 @@ del "%~f0"
         f.write(batch_script)
 
     # 5. Launch Batch and Exit
-    subprocess.Popen(bat_path, shell=True)
+    os.startfile(bat_path)
     sys.exit(0)
