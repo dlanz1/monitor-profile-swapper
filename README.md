@@ -15,7 +15,7 @@ Perfect for games like *Escape from Tarkov* where higher visibility is crucial, 
 ## 📸 Preview
 
 **Configuration GUI**
-![Settings Preview](docs/settings_preview.png)
+![Settings Preview](docs/gui_preview.png)
 
 ---
 
