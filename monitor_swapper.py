@@ -134,10 +134,15 @@ def open_settings(icon, item):
         settings_path = "swapper_config.py"
     
     print(f"Launching settings: {settings_path}")
+    
+    # CRITICAL: Clear _MEIPASS so Settings.exe doesn't inherit the parent's temp folder
+    clean_env = os.environ.copy()
+    clean_env.pop("_MEIPASS", None)
+
     if settings_path.endswith(".py"):
-        subprocess.Popen(["python", settings_path])
+        subprocess.Popen(["python", settings_path], env=clean_env)
     else:
-        subprocess.Popen([settings_path])
+        subprocess.Popen([settings_path], env=clean_env)
 
 def quit_app(icon, item):
     icon.stop()
