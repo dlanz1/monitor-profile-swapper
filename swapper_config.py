@@ -5,6 +5,7 @@ import os
 import sys
 import sv_ttk
 import darkdetect
+from monitorcontrol import get_monitors
 
 CONFIG_FILE = "config.json"
 
@@ -37,7 +38,7 @@ class ConfigApp(ttk.Frame):
         super().__init__(root)
         self.root = root
         self.root.title("Monitor Profile Swapper")
-        self.root.geometry("600x550")
+        self.root.geometry("600x600")
         
         # Initial Theme Application
         self.current_theme = darkdetect.theme()
@@ -80,8 +81,12 @@ class ConfigApp(ttk.Frame):
         settings_container.columnconfigure(3, weight=1)
 
         # Game Mode Column
-        ttk.Label(settings_container, text="🎮 Game Mode", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        game_header_frame = ttk.Frame(settings_container)
+        game_header_frame.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
         
+        ttk.Label(game_header_frame, text="🎮 Game Mode", font=("Segoe UI", 11, "bold")).pack(side="left", padx=(0, 10))
+        ttk.Button(game_header_frame, text="Test", width=5, command=lambda: self.test_settings("game")).pack(side="left")
+
         ttk.Label(settings_container, text="Brightness").grid(row=1, column=0, sticky="w", pady=5)
         self.game_bri = ttk.Spinbox(settings_container, from_=0, to=100, width=8)
         self.game_bri.grid(row=1, column=1, sticky="w", padx=10)
@@ -94,7 +99,11 @@ class ConfigApp(ttk.Frame):
         ttk.Separator(settings_container, orient="vertical").grid(row=0, column=2, rowspan=3, sticky="ns", padx=20)
 
         # Desktop Mode Column
-        ttk.Label(settings_container, text="🖥️ Desktop Mode", font=("Segoe UI", 11, "bold")).grid(row=0, column=3, columnspan=2, sticky="w", pady=(0, 10))
+        desk_header_frame = ttk.Frame(settings_container)
+        desk_header_frame.grid(row=0, column=3, columnspan=2, sticky="w", pady=(0, 10))
+
+        ttk.Label(desk_header_frame, text="🖥️ Desktop Mode", font=("Segoe UI", 11, "bold")).pack(side="left", padx=(0, 10))
+        ttk.Button(desk_header_frame, text="Test", width=5, command=lambda: self.test_settings("desktop")).pack(side="left")
 
         ttk.Label(settings_container, text="Brightness").grid(row=1, column=3, sticky="w", pady=5)
         self.desk_bri = ttk.Spinbox(settings_container, from_=0, to=100, width=8)
@@ -140,6 +149,45 @@ class ConfigApp(ttk.Frame):
 
         self.desk_bri.set(self.config["desktop_mode"]["brightness"])
         self.desk_con.set(self.config["desktop_mode"]["contrast"])
+
+    def test_settings(self, mode):
+        try:
+            if mode == "game":
+                bri = int(self.game_bri.get())
+                con = int(self.game_con.get())
+                lbl = "Game Mode"
+            else:
+                bri = int(self.desk_bri.get())
+                con = int(self.desk_con.get())
+                lbl = "Desktop Mode"
+            
+            # Show busy cursor
+            self.root.config(cursor="wait")
+            self.root.update()
+
+            monitors = get_monitors()
+            if not monitors:
+                messagebox.showerror("Error", "No compatible monitors found!", parent=self.root)
+                self.root.config(cursor="")
+                return
+
+            applied_count = 0
+            for m in monitors:
+                with m:
+                    # Apply Brightness (0x10) and Contrast (0x12)
+                    m.vcp.set_vcp_feature(0x10, bri)
+                    m.vcp.set_vcp_feature(0x12, con)
+                    applied_count += 1
+            
+            self.root.config(cursor="")
+            messagebox.showinfo("Test Complete", f"Applied {lbl} settings to {applied_count} monitor(s).\n(B: {bri}, C: {con})", parent=self.root)
+
+        except ValueError:
+            self.root.config(cursor="")
+            messagebox.showerror("Invalid Input", "Brightness and Contrast must be integers (0-100).", parent=self.root)
+        except Exception as e:
+            self.root.config(cursor="")
+            messagebox.showerror("Error", f"Failed to apply settings: {e}", parent=self.root)
 
     def add_process(self):
         new_proc = simpledialog.askstring("Add Process", "Enter process name (e.g. game.exe):", parent=self.root)
