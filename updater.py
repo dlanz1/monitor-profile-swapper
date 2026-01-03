@@ -7,7 +7,7 @@ import shutil
 from packaging import version
 
 # Current version of the application
-CURRENT_VERSION = "v1.3.9"
+CURRENT_VERSION = "v1.4.0"
 
 # GitHub Repository details
 REPO_OWNER = "dlanz1"
@@ -100,16 +100,17 @@ def perform_update(release_data):
     print("   Scheduling restart...")
     # Use /D to ensure we stay in the right drive, and use absolute paths
     # CRITICAL: We MUST clear _MEIPASS environment variable. 
-    # start /i ensures the new process doesn't inherit the current environment.
+    # We remove /i so the start command inherits our cleaned environment.
     batch_script = f"""
 @echo off
 echo Finalizing update...
 taskkill /F /IM MonitorSwapper.exe /T > NUL 2>&1
+taskkill /F /IM Settings.exe /T > NUL 2>&1
 timeout /t 3 /nobreak > NUL
 echo Updating files in {BASE_DIR}...
 cd /d "{BASE_DIR}"
-xcopy /Y /E "{extract_folder}\\*" "{BASE_DIR}"
-if %errorlevel% neq 0 (
+robocopy "{extract_folder}" "{BASE_DIR}" /E /IS /IT /NP /R:3 /W:5 > NUL
+if %errorlevel% geq 8 (
     echo Update failed! Please close any open Monitor Swapper windows and try again.
     pause
     exit
@@ -120,8 +121,8 @@ del "{zip_path}"
 echo Restarting...
 set _MEIPASS=
 set _MEI=
-start /i "" "{exe_name}"
-start /i "" "Settings.exe"
+start "" "{exe_name}"
+start "" "Settings.exe"
 del "%~f0"
 """
     
