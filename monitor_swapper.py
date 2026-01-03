@@ -143,6 +143,25 @@ def quit_app(icon, item):
     stop_event.set()
     sys.exit(0)
 
+def manual_update_check(icon, item):
+    # Use standard Windows MessageBox for feedback
+    MB_OK = 0x0
+    MB_YESNO = 0x4
+    MB_ICONINFO = 0x40
+    MB_ICONQUESTION = 0x20
+    IDYES = 6
+
+    update_data = updater.check_for_updates()
+    if update_data:
+        new_ver = update_data.get("tag_name", "Unknown")
+        msg = f"A new update ({new_ver}) is available. Would you like to install it now?\n\nThe application will restart automatically."
+        res = ctypes.windll.user32.MessageBoxW(0, msg, "Update Available", MB_YESNO | MB_ICONQUESTION)
+        
+        if res == IDYES:
+            updater.perform_update(update_data)
+    else:
+        ctypes.windll.user32.MessageBoxW(0, "You are already running the latest version.", "No Updates Found", MB_OK | MB_ICONINFO)
+
 def main():
     # --- Auto-Update Check ---
     update_data = updater.check_for_updates()
@@ -162,6 +181,8 @@ def main():
         menu = pystray.Menu(
             pystray.MenuItem("Monitor Swapper", None, enabled=False),
             pystray.MenuItem("Settings", open_settings, default=True),
+            pystray.MenuItem("Check for updates", manual_update_check),
+            pystray.Menu.Separator(),
             pystray.MenuItem("Exit", quit_app)
         )
         icon = pystray.Icon("MonitorSwapper", create_icon(), "Monitor Swapper", menu, action=open_settings)
