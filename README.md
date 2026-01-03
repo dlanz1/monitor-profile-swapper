@@ -4,9 +4,9 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?style=for-the-badge&logo=windows)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
-**Automate your monitor's brightness and contrast settings based on the game you're playing.**
+**Automate your monitor's brightness, contrast, and HDR settings based on the game you're playing.**
 
-Monitor Profile Swapper is a lightweight utility that automatically switches your monitor's display settings (Brightness & Contrast) when specific applications (like games) are launched. When you close the game, it instantly reverts to your desktop preferences.
+Monitor Profile Swapper is a lightweight utility that automatically switches your monitor's display settings when specific applications (like games) are launched. When you close the game, it instantly reverts to your desktop preferences.
 
 Perfect for games like *Escape from Tarkov* where higher visibility is crucial, without blinding yourself on your desktop.
 
@@ -14,7 +14,7 @@ Perfect for games like *Escape from Tarkov* where higher visibility is crucial, 
 
 ## 📸 Preview
 
-**Configuration GUI**
+**Modern Windows 11 GUI**
 ![Settings Preview](docs/gui_preview.png)
 
 ---
@@ -23,9 +23,11 @@ Perfect for games like *Escape from Tarkov* where higher visibility is crucial, 
 
 *   **Automatic Detection**: Watches for specific process names (e.g., `EscapeFromTarkov.exe`).
 *   **Dual Profiles**:
-    *   **Game Mode**: Boost brightness/contrast for competitive advantage.
-    *   **Desktop Mode**: Comfortable settings for browsing and work.
-*   **User Friendly GUI**: Easily add/remove games and tweak settings without editing code.
+    *   **Game Mode**: Boost brightness/contrast and optionally enable **HDR** for a competitive advantage.
+    *   **Desktop Mode**: Comfortable settings for browsing and work. matched to your system theme.
+*   **HDR Toggling**: Automatically enables Windows HDR when entering game mode and disables it on exit.
+*   **System Tray Control**: Background monitoring with a handy tray icon for quick access to settings and manual update checks.
+*   **Auto-Updating**: Stay up to date automatically. The app checks for new versions on launch and can be updated with a single click.
 *   **DDC/CI Support**: Communicates directly with your monitor hardware.
 *   **Portable**: Runs as a standalone executable (no installation required).
 
@@ -35,11 +37,10 @@ Perfect for games like *Escape from Tarkov* where higher visibility is crucial, 
 
 ### Option 1: Download the Release
 1.  Download the latest `.zip` from the [Releases](../../releases) page.
-2.  Extract the folder to a location of your choice.
-3.  Open the folder.
+2.  Extract the folder to a location like `Documents\MonitorSwapper`.
+3.  Run `MonitorSwapper.exe`.
 
 ### Option 2: Build from Source
-If you prefer to run from source or build it yourself:
 ```bash
 git clone https://github.com/dlanz1/monitor-profile-swapper.git
 cd monitor-profile-swapper
@@ -52,23 +53,18 @@ python build.py
 ## 🎮 How to Use
 
 1.  **Configure Settings**:
-    Run `Settings.exe`.
-    *   **Game Processes**: Add the executable names of the games you want to detect (e.g., `game.exe`).
-    *   **Monitor Settings**: Enter values (0-100) for Brightness and Contrast for both modes.
-    *   Click **Save Settings**.
+    Click the tray icon or run `Settings.exe`.
+    *   **Watched Processes**: Add the executable names of the games you want to detect.
+    *   **Monitor Calibration**: Set Brightness and Contrast (0-100).
+    *   **HDR**: Check "Enable HDR" if you want the tool to toggle Windows HDR for you.
+    *   Click **Save Configuration**.
 
-2.  **Start Monitoring**:
-    Run `MonitorSwapper.exe`.
-    *   Keep this window open (or minimize it).
-    *   The tool will scan for your games every few seconds.
-    *   When a game is found, your monitor will visibly update.
+2.  **Background Monitoring**:
+    *   `MonitorSwapper.exe` runs silently in your system tray.
+    *   Right-click the icon to manually **Check for updates** or exit the app.
+    *   When a game is detected, your monitor settings will update visibly.
 
 ---
-
-## ⚠️ Requirements
-
-*   **DDC/CI Enabled Monitor**: Ensure "DDC/CI" is turned **ON** in your physical monitor's OSD menu.
-*   **Windows OS**: Currently supports Windows due to DDC/CI library dependencies.
 
 ## 🖥️ Hardware Compatibility
 
@@ -76,44 +72,9 @@ This tool relies on the **DDC/CI** standard to communicate with your display.
 
 *   ✅ **Supported**: Most modern external PC monitors (connected via DisplayPort, HDMI, or DVI).
 *   ❌ **Likely Unsupported**:
-    *   **Laptop Screens**: Internal displays usually use different control methods and are not supported by this tool.
+    *   **Laptop Screens**: Internal displays usually use different control methods.
     *   **TVs**: Many televisions do not support DDC/CI over HDMI.
     *   **DisplayLink Docks**: Some USB docking stations may block DDC/CI signals.
-
-If the tool runs but settings don't change, check your cable connection and ensure DDC/CI is enabled in your monitor's on-screen menu.
-
----
-
-## 🛠️ Configuration
-
-Your settings are stored in `config.json`. You can edit this file manually if you prefer:
-
-```json
-{
-    "game_processes": [
-        "EscapeFromTarkov.exe",
-        "TarkovArena.exe"
-    ],
-    "game_mode": {
-        "brightness": 100,
-        "contrast": 80
-    },
-    "desktop_mode": {
-        "brightness": 40,
-        "contrast": 50
-    }
-}
-```
-
----
-
-## 🤝 Contributing
-
-1.  Fork the repository.
-2.  Create your feature branch (`git checkout -b feature/AmazingFeature`).
-3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4.  Push to the branch (`git push origin feature/AmazingFeature`).
-5.  Open a Pull Request.
 
 ---
 
