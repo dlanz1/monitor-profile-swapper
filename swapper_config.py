@@ -3,6 +3,7 @@ from tkinter import messagebox, simpledialog, ttk, filedialog
 import json
 import os
 import sys
+import threading
 import sv_ttk
 import darkdetect
 from monitorcontrol import get_monitors
@@ -170,8 +171,6 @@ class ConfigApp(ttk.Frame):
         self.tray_var.set(self.config.get("tray_enabled", True))
 
     def test_settings(self, mode):
-        import threading
-
         try:
             if mode == "game":
                 bri = int(self.game_bri.get())
