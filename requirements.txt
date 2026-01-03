@@ -6,3 +6,5 @@ darkdetect
 requests
 packaging
 pyautogui
+pystray
+pillow

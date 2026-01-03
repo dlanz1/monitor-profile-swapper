@@ -3,16 +3,24 @@ import psutil
 import json
 import os
 import sys
+import threading
+import subprocess
 from monitorcontrol import get_monitors
 import updater
 import hdr_control
+import pystray
+from PIL import Image, ImageDraw
 
 CONFIG_FILE = "config.json"
 DEFAULT_CONFIG = {
     "game_processes": ["EscapeFromTarkov.exe", "EscapeFromTarkov_BE.exe", "TarkovArena.exe"],
     "game_mode": {"brightness": 80, "contrast": 80, "hdr_enabled": False},
-    "desktop_mode": {"brightness": 50, "contrast": 50}
+    "desktop_mode": {"brightness": 50, "contrast": 50},
+    "tray_enabled": True
 }
+
+# Global flag to stop threads
+stop_event = threading.Event()
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -48,15 +56,86 @@ def check_process(process_list):
         try:
             name = proc.info['name']
             if name in process_list:
-                # print(f"   >>> FOUND GAME PROCESS: {name}") # too verbose for loop
                 return True
         except:
             pass
     return False
 
-def main():
+def monitoring_loop():
     print("--- MONITOR PROFILE SWAPPER ---")
     
+    config = load_config()
+    game_processes = config.get("game_processes", [])
+    game_mode = config.get("game_mode", {})
+    desktop_mode = config.get("desktop_mode", {})
+    
+    hdr_in_game = game_mode.get("hdr_enabled", False)
+    
+    print(f"Monitoring for: {game_processes}")
+    
+    in_game_mode = False
+    
+    # Apply Desktop Mode on startup
+    print("Applying Desktop settings on startup...")
+    set_monitor(desktop_mode.get("brightness", 50), desktop_mode.get("contrast", 50))
+    if hdr_in_game:
+        hdr_control.set_hdr_mode(False)
+
+    while not stop_event.is_set():
+        # Reload config periodically? For now, we assume restart on config change
+        # But we can reload basic flags if needed.
+        
+        is_running = check_process(game_processes)
+        
+        if is_running and not in_game_mode:
+            print("DETECTED LAUNCH! Switching to Game settings...")
+            set_monitor(game_mode.get("brightness", 80), game_mode.get("contrast", 80))
+            if hdr_in_game:
+                hdr_control.set_hdr_mode(True)
+            in_game_mode = True
+        
+        elif not is_running and in_game_mode:
+            print("DETECTED CLOSE. Restoring Desktop settings...")
+            set_monitor(desktop_mode.get("brightness", 50), desktop_mode.get("contrast", 50))
+            if hdr_in_game:
+                hdr_control.set_hdr_mode(False)
+            in_game_mode = False
+        
+        time.sleep(2)
+
+def create_icon():
+    # Create a simple icon
+    width = 64
+    height = 64
+    image = Image.new('RGB', (width, height), (0, 0, 0))
+    dc = ImageDraw.Draw(image)
+    # Draw a blue 'M'
+    dc.rectangle((0, 0, width, height), fill=(30, 30, 30))
+    dc.rectangle((16, 16, 48, 48), fill=(0, 120, 215))
+    return image
+
+def open_settings(icon, item):
+    # Launch Settings.exe
+    if getattr(sys, 'frozen', False):
+        # Running as exe
+        base_path = os.path.dirname(sys.executable)
+        settings_path = os.path.join(base_path, "Settings.exe")
+    else:
+        # Running as script
+        settings_path = "swapper_config.py"
+    
+    print(f"Launching settings: {settings_path}")
+    if settings_path.endswith(".py"):
+        subprocess.Popen(["python", settings_path])
+    else:
+        subprocess.Popen([settings_path])
+
+def quit_app(icon, item):
+    icon.stop()
+    stop_event.set()
+    sys.exit(0)
+
+def main():
     # --- Auto-Update Check ---
     update_data = updater.check_for_updates()
     if update_data:
@@ -64,57 +143,29 @@ def main():
     # -------------------------
 
     config = load_config()
-    game_processes = config.get("game_processes", [])
-    game_mode = config.get("game_mode", {})
-    desktop_mode = config.get("desktop_mode", {})
     
-    # Reload HDR preference
-    hdr_in_game = game_mode.get("hdr_enabled", False)
-    
-    print(f"Monitoring for: {game_processes}")
-    print(f"Game Mode: {game_mode}")
-    print(f"Desktop Mode: {desktop_mode}")
-    print(f"HDR in Game: {hdr_in_game}")
-    
-    in_game_mode = False
-    
-    # Apply Desktop Mode on startup ensuring consistent state
-    print("Applying Desktop settings on startup...")
-    set_monitor(desktop_mode.get("brightness", 50), desktop_mode.get("contrast", 50))
-    # Ensure HDR is OFF for desktop if configured for game, or just rely on Windows default?
-    # Strategy: Only enforce HDR ON during game. Enforce HDR OFF when leaving game.
-    if hdr_in_game:
-        hdr_control.set_hdr_mode(False) # Start with HDR Off if we manage it
+    # Start monitoring in a separate thread
+    monitor_thread = threading.Thread(target=monitoring_loop)
+    monitor_thread.daemon = True
+    monitor_thread.start()
 
-    while True:
-        is_running = check_process(game_processes)
-        
-        # Determine target state
-        if is_running and not in_game_mode:
-            print("DETECTED LAUNCH! Switching to Game settings...")
-            if set_monitor(game_mode.get("brightness", 80), game_mode.get("contrast", 80)):
-                pass # Monitor settings applied
-            
-            # HDR Logic
-            if hdr_in_game:
-                hdr_control.set_hdr_mode(True)
-
-            in_game_mode = True
-        
-        elif not is_running and in_game_mode:
-            print("DETECTED CLOSE. Restoring Desktop settings...")
-            if set_monitor(desktop_mode.get("brightness", 50), desktop_mode.get("contrast", 50)):
-                pass
-            
-            # HDR Logic
-            if hdr_in_game:
-                hdr_control.set_hdr_mode(False)
-
-            in_game_mode = False
-        
-        # Optional: Periodic config reload check could go here
-        
-        time.sleep(2)
+    if config.get("tray_enabled", True):
+        print("Starting System Tray Icon...")
+        menu = pystray.Menu(
+            pystray.MenuItem("Monitor Swapper", None, enabled=False),
+            pystray.MenuItem("Settings", open_settings),
+            pystray.MenuItem("Exit", quit_app)
+        )
+        icon = pystray.Icon("MonitorSwapper", create_icon(), "Monitor Swapper", menu)
+        icon.run()
+    else:
+        print("Tray icon disabled. Running in console mode.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            stop_event.set()
 
 if __name__ == "__main__":
     main()
+

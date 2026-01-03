@@ -12,7 +12,8 @@ CONFIG_FILE = "config.json"
 DEFAULT_CONFIG = {
     "game_processes": ["EscapeFromTarkov.exe", "EscapeFromTarkov_BE.exe", "TarkovArena.exe"],
     "game_mode": {"brightness": 80, "contrast": 80, "hdr_enabled": False},
-    "desktop_mode": {"brightness": 50, "contrast": 50}
+    "desktop_mode": {"brightness": 50, "contrast": 50},
+    "tray_enabled": True
 }
 
 def load_config():
@@ -122,6 +123,10 @@ class ConfigApp(ttk.Frame):
         footer_frame = ttk.Frame(self)
         footer_frame.pack(fill="x", pady=10)
 
+        # Tray Option
+        self.tray_var = tk.BooleanVar()
+        ttk.Checkbutton(footer_frame, text="Show System Tray Icon", variable=self.tray_var).pack(side="left")
+
         save_btn = ttk.Button(footer_frame, text="Save Configuration", command=self.save_settings, style="Accent.TButton")
         save_btn.pack(side="right")
         
@@ -155,6 +160,8 @@ class ConfigApp(ttk.Frame):
 
         self.desk_bri.set(self.config["desktop_mode"]["brightness"])
         self.desk_con.set(self.config["desktop_mode"]["contrast"])
+        
+        self.tray_var.set(self.config.get("tray_enabled", True))
 
     def test_settings(self, mode):
         try:
@@ -220,6 +227,7 @@ class ConfigApp(ttk.Frame):
             self.config["desktop_mode"]["brightness"] = int(self.desk_bri.get())
             self.config["desktop_mode"]["contrast"] = int(self.desk_con.get())
             self.config["game_processes"] = list(self.proc_listbox.get(0, tk.END))
+            self.config["tray_enabled"] = self.tray_var.get()
             
             save_config(self.config)
         except ValueError:
