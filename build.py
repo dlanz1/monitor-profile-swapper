@@ -23,7 +23,7 @@ def main():
     run_command("pyinstaller --noconfirm --onefile --console --name MonitorSwapper monitor_swapper.py")
 
     print("Building Settings GUI...")
-    run_command("pyinstaller --noconfirm --onefile --windowed --name Settings --hidden-import=sv_ttk swapper_config.py")
+    run_command("pyinstaller --noconfirm --onefile --windowed --name Settings --hidden-import=sv_ttk --hidden-import=darkdetect swapper_config.py")
 
     # Organize into a Release folder
     os.makedirs("Release", exist_ok=True)

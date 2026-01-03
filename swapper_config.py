@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import sv_ttk
+import darkdetect
 
 CONFIG_FILE = "config.json"
 
@@ -38,9 +39,12 @@ class ConfigApp(ttk.Frame):
         self.root.title("Monitor Profile Swapper")
         self.root.geometry("600x550")
         
-        # Apply the Windows 11 style theme (Dark or Light based on system, or force one)
-        # sv_ttk.set_theme("dark")  # You can toggle this
-        sv_ttk.set_theme("light")
+        # Initial Theme Application
+        self.current_theme = darkdetect.theme()
+        sv_ttk.set_theme(self.current_theme.lower())
+        
+        # Start monitoring for theme changes
+        self.check_theme_change()
 
         self.config = load_config()
         self.pack(fill="both", expand=True, padx=20, pady=20)
@@ -111,6 +115,16 @@ class ConfigApp(ttk.Frame):
         reload_btn.pack(side="right", padx=10)
 
         self.refresh_ui()
+
+    def check_theme_change(self):
+        new_theme = darkdetect.theme()
+        if new_theme != self.current_theme:
+            self.current_theme = new_theme
+            if new_theme:
+                sv_ttk.set_theme(new_theme.lower())
+        
+        # Check again in 2 seconds
+        self.root.after(2000, self.check_theme_change)
 
     def refresh_ui(self):
         self.config = load_config()
