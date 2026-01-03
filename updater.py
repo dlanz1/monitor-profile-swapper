@@ -4,8 +4,8 @@ import sys
 import subprocess
 import zipfile
 import shutil
-import time
 import stat
+import time
 import re
 from packaging import version
 
@@ -61,6 +61,44 @@ def cleanup_update_artifacts():
             print(f"   Warning: Failed to clean update folder: {e}")
     
     return zip_cleaned or folder_cleaned
+
+class PathTraversalError(Exception):
+    """Exception raised when a zip file contains a path traversal attempt."""
+    pass
+
+
+def safe_extract(zip_ref, target_dir):
+    """
+    Extracts files from a zip archive to a target directory,
+    ensuring that no files are extracted outside the target directory.
+    Validates against path traversal attacks and symbolic link exploits.
+    """
+    target_dir = os.path.abspath(target_dir)
+    for member in zip_ref.infolist():
+        filename = member.filename
+        
+        # Validate filename is not empty and not just path separators
+        if not filename:
+            raise PathTraversalError("Invalid filename in zip file: empty filename")
+        if not filename.strip("/\\"):
+            raise PathTraversalError(f"Invalid filename in zip file (only path separators): {filename!r}")
+        
+        # Normalize and validate the path
+        member_path = os.path.abspath(os.path.normpath(os.path.join(target_dir, filename)))
+        
+        # Prevent path traversal (e.g., ../../../etc/passwd)
+        if os.path.commonpath([target_dir, member_path]) != target_dir:
+            raise PathTraversalError(f"Attempted path traversal in zip file: {member.filename}")
+        
+        # Reject symbolic links to prevent symlink-based attacks
+        # Note: This check relies on Unix file permissions in external_attr (bits 16-31).
+        # It works for zip files created on Unix/Linux systems but may not detect
+        # symlinks in zip files created on Windows or by non-standard tools.
+        if (member.external_attr >> 16) & 0o170000 == stat.S_IFLNK:
+            raise PathTraversalError(f"Zip file contains symbolic link: {member.filename}")
+        
+        # Extract each validated member individually to maintain full control
+        zip_ref.extract(member, target_dir)
 
 def check_for_updates():
     """
@@ -182,7 +220,7 @@ def perform_update(release_data):
         os.makedirs(extract_folder)
         
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(extract_folder)
+            safe_extract(zip_ref, extract_folder)
     except zipfile.BadZipFile:
         print("   Extraction failed: Corrupt or invalid ZIP file.")
         return False
