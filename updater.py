@@ -7,7 +7,7 @@ import shutil
 from packaging import version
 
 # Current version of the application
-CURRENT_VERSION = "v1.3.5"
+CURRENT_VERSION = "v1.3.6"
 
 # GitHub Repository details
 REPO_OWNER = "dlanz1"

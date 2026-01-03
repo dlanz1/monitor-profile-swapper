@@ -5,6 +5,7 @@ import os
 import sys
 import threading
 import subprocess
+import ctypes
 from monitorcontrol import get_monitors
 import updater
 import hdr_control
@@ -141,7 +142,8 @@ def open_settings(icon, item):
 def quit_app(icon, item):
     icon.stop()
     stop_event.set()
-    sys.exit(0)
+    # Use os._exit to kill all threads immediately and avoid pystray callback noise
+    os._exit(0)
 
 def manual_update_check(icon, item):
     # Use standard Windows MessageBox for feedback
@@ -182,7 +184,7 @@ def main():
             pystray.MenuItem("Monitor Swapper", None, enabled=False),
             pystray.MenuItem("Settings", open_settings, default=True),
             pystray.MenuItem("Check for updates", manual_update_check),
-            pystray.Menu.Separator(),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit", quit_app)
         )
         icon = pystray.Icon("MonitorSwapper", create_icon(), "Monitor Swapper", menu, action=open_settings)
