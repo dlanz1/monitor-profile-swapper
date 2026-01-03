@@ -3,6 +3,7 @@ from tkinter import messagebox, simpledialog, ttk, filedialog
 import json
 import os
 import sys
+import threading
 import sv_ttk
 import darkdetect
 from monitorcontrol import get_monitors
@@ -179,34 +180,39 @@ class ConfigApp(ttk.Frame):
                 bri = int(self.desk_bri.get())
                 con = int(self.desk_con.get())
                 lbl = "Desktop Mode"
-            
-            # Show busy cursor
-            self.root.config(cursor="wait")
-            self.root.update()
-
-            monitors = get_monitors()
-            if not monitors:
-                messagebox.showerror("Error", "No compatible monitors found!", parent=self.root)
-                self.root.config(cursor="")
-                return
-
-            applied_count = 0
-            for m in monitors:
-                with m:
-                    # Apply Brightness (0x10) and Contrast (0x12)
-                    m.vcp.set_vcp_feature(0x10, bri)
-                    m.vcp.set_vcp_feature(0x12, con)
-                    applied_count += 1
-            
-            self.root.config(cursor="")
-            messagebox.showinfo("Test Complete", f"Applied {lbl} settings to {applied_count} monitor(s).\n(B: {bri}, C: {con})", parent=self.root)
-
         except ValueError:
-            self.root.config(cursor="")
             messagebox.showerror("Invalid Input", "Brightness and Contrast must be integers (0-100).", parent=self.root)
-        except Exception as e:
-            self.root.config(cursor="")
-            messagebox.showerror("Error", f"Failed to apply settings: {e}", parent=self.root)
+            return
+
+        def run_test():
+            try:
+                monitors = get_monitors()
+                if not monitors:
+                    self.root.after(0, lambda: messagebox.showerror("Error", "No compatible monitors found!", parent=self.root))
+                    return
+
+                applied_count = 0
+                for m in monitors:
+                    with m:
+                        # Apply Brightness (0x10) and Contrast (0x12)
+                        m.vcp.set_vcp_feature(0x10, bri)
+                        m.vcp.set_vcp_feature(0x12, con)
+                        applied_count += 1
+
+                msg = f"Applied {lbl} settings to {applied_count} monitor(s).\n(B: {bri}, C: {con})"
+                self.root.after(0, lambda: messagebox.showinfo("Test Complete", msg, parent=self.root))
+
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to apply settings: {e}", parent=self.root))
+            finally:
+                self.root.after(0, lambda: self.root.config(cursor=""))
+
+        # Show busy cursor
+        self.root.config(cursor="wait")
+        self.root.update()
+
+        # Run in background
+        threading.Thread(target=run_test, daemon=True).start()
 
     def add_process(self):
         new_proc = simpledialog.askstring("Add Process", "Enter process name (e.g. game.exe):", parent=self.root)
