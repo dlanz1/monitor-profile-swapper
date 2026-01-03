@@ -14,7 +14,6 @@ Perfect for games like *Escape from Tarkov* where higher visibility is crucial, 
 
 ## 📸 Preview
 
-**Modern Windows 11 GUI**
 ![Settings Preview](docs/gui_v140.png)
 
 ---
@@ -24,7 +23,7 @@ Perfect for games like *Escape from Tarkov* where higher visibility is crucial, 
 *   **Automatic Detection**: Watches for specific process names (e.g., `EscapeFromTarkov.exe`).
 *   **Dual Profiles**:
     *   **Game Mode**: Boost brightness/contrast and optionally enable **HDR** for a competitive advantage.
-    *   **Desktop Mode**: Comfortable settings for browsing and work. matched to your system theme.
+    *   **Desktop Mode**: Comfortable settings for browsing and work, matched to your system theme.
 *   **HDR Toggling**: Automatically enables Windows HDR when entering game mode and disables it on exit.
 *   **System Tray Control**: Background monitoring with a handy tray icon for quick access to settings and manual update checks.
 *   **Auto-Updating**: Stay up to date automatically. The app checks for new versions on launch and can be updated with a single click.
