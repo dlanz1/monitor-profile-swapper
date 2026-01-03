@@ -100,6 +100,113 @@ def prompt_vcredist_install():
     
     return True  # User chose to continue anyway
 
+def get_startup_folder():
+    """Get the Windows Startup folder path."""
+    import winreg
+    key = winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER,
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
+    )
+    startup_path, _ = winreg.QueryValueEx(key, "Startup")
+    winreg.CloseKey(key)
+    return startup_path
+
+def get_startup_shortcut_path():
+    """Get the path where our startup shortcut would be."""
+    return os.path.join(get_startup_folder(), "MonitorSwapper.lnk")
+
+def is_in_startup():
+    """Check if the program is already in startup."""
+    return os.path.exists(get_startup_shortcut_path())
+
+def add_to_startup():
+    """Add the program to Windows startup by creating a shortcut."""
+    try:
+        import win32com.client
+        
+        startup_path = get_startup_shortcut_path()
+        
+        if getattr(sys, 'frozen', False):
+            target = sys.executable
+        else:
+            # When running as script, don't add to startup
+            return False
+        
+        shell = win32com.client.Dispatch("WScript.Shell")
+        shortcut = shell.CreateShortCut(startup_path)
+        shortcut.Targetpath = target
+        shortcut.WorkingDirectory = os.path.dirname(target)
+        shortcut.IconLocation = target
+        shortcut.Description = "Monitor Profile Swapper - Auto-switch monitor settings"
+        shortcut.save()
+        
+        return True
+    except Exception as e:
+        print(f"Failed to add to startup: {e}")
+        return False
+
+def remove_from_startup():
+    """Remove the program from Windows startup."""
+    try:
+        shortcut_path = get_startup_shortcut_path()
+        if os.path.exists(shortcut_path):
+            os.remove(shortcut_path)
+            return True
+    except Exception as e:
+        print(f"Failed to remove from startup: {e}")
+    return False
+
+def prompt_startup_option():
+    """
+    Prompt the user to add the program to startup if not already added.
+    Only prompts once - stores preference in config.
+    """
+    # Only prompt when running as exe
+    if not getattr(sys, 'frozen', False):
+        return
+    
+    # Check if already in startup
+    if is_in_startup():
+        return
+    
+    # Check if user has already been prompted (stored in config)
+    config = load_config()
+    if config.get("startup_prompted", False):
+        return
+    
+    MB_YESNO = 0x04
+    MB_ICONQUESTION = 0x20
+    IDYES = 6
+    
+    message = (
+        "For the best experience, Monitor Profile Swapper should run automatically when Windows starts.\n\n"
+        "Would you like to add it to your startup programs?\n\n"
+        "(You can change this later in Windows Settings > Apps > Startup)"
+    )
+    
+    result = ctypes.windll.user32.MessageBoxW(
+        0, message, "Run on Startup?", MB_YESNO | MB_ICONQUESTION
+    )
+    
+    if result == IDYES:
+        if add_to_startup():
+            MB_OK = 0x00
+            MB_ICONINFORMATION = 0x40
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                "Monitor Profile Swapper will now start automatically with Windows.",
+                "Added to Startup",
+                MB_OK | MB_ICONINFORMATION
+            )
+    
+    # Mark as prompted so we don't ask again
+    config["startup_prompted"] = True
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=4)
+    except Exception:
+        pass
+
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         print("Config file not found, using defaults.")
@@ -279,6 +386,10 @@ def main():
             sys.exit(0)
         print("User chose to continue without VC++ Redistributable.")
     # ----------------------------------
+
+    # --- Startup Prompt (first run only) ---
+    prompt_startup_option()
+    # ---------------------------------------
 
     # --- Auto-Update Check ---
     update_data = updater.check_for_updates()
