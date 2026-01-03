@@ -3,3 +3,5 @@ psutil
 pyinstaller
 sv-ttk
 darkdetect
+requests
+packaging

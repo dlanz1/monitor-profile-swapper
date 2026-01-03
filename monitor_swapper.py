@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from monitorcontrol import get_monitors
+import updater
 
 CONFIG_FILE = "config.json"
 DEFAULT_CONFIG = {
@@ -54,6 +55,13 @@ def check_process(process_list):
 
 def main():
     print("--- MONITOR PROFILE SWAPPER ---")
+    
+    # --- Auto-Update Check ---
+    update_data = updater.check_for_updates()
+    if update_data:
+        updater.perform_update(update_data)
+    # -------------------------
+
     config = load_config()
     game_processes = config.get("game_processes", [])
     game_mode = config.get("game_mode", {})
