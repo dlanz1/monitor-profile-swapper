@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from packaging import version
 
 # Current version of the application
-CURRENT_VERSION = "v1.5.0"
+CURRENT_VERSION = "v1.6.0"
 
 # GitHub Repository details
 REPO_OWNER = "dlanz1"
