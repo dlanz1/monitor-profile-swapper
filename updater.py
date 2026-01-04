@@ -87,8 +87,13 @@ def safe_extract(zip_ref, target_dir):
         member_path = os.path.abspath(os.path.normpath(os.path.join(target_dir, filename)))
 
         # Prevent path traversal (e.g., ../../../etc/passwd)
-        if os.path.commonpath([target_dir, member_path]) != target_dir:
-            raise PathTraversalError(f"Attempted path traversal in zip file: {member.filename}")
+        try:
+            if os.path.commonpath([target_dir, member_path]) != target_dir:
+                raise PathTraversalError(f"Attempted path traversal in zip file: {member.filename}")
+        except ValueError:
+            # On Windows, os.path.commonpath raises ValueError if paths are on different drives.
+            # If they are on different drives, it's definitely a traversal attempt.
+            raise PathTraversalError(f"Attempted path traversal (different drive) in zip file: {member.filename}")
 
         # Reject symbolic links to prevent symlink-based attacks
         # Note: This check relies on Unix file permissions in external_attr (bits 16-31).
