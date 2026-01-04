@@ -35,6 +35,10 @@ from updater import (
     _escape_batch_path,
     _check_disk_space,
     _is_writable,
+    _create_backup,
+    _restore_backup,
+    _cleanup_backup,
+    _log,
     check_for_updates,
     perform_update,
     cleanup_update_artifacts,
@@ -739,6 +743,156 @@ class TestDownloadSizeLimit(unittest.TestCase):
             _download_with_progress("https://example.com/file", "/tmp/test.zip")
 
         self.assertIn("exceeds maximum", str(cm.exception))
+
+
+class TestBackupRestore(unittest.TestCase):
+    """Tests for backup and restore functionality."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.test_exe = os.path.join(self.test_dir, 'test.exe')
+        with open(self.test_exe, 'w') as f:
+            f.write('original content')
+
+    def tearDown(self):
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir, onerror=_remove_readonly)
+
+    def test_create_backup_success(self):
+        """Test creating a backup of an existing file."""
+        backup_path = _create_backup(self.test_exe)
+        
+        self.assertIsNotNone(backup_path)
+        self.assertTrue(os.path.exists(backup_path))
+        self.assertEqual(backup_path, self.test_exe + '.backup')
+        
+        with open(backup_path) as f:
+            self.assertEqual(f.read(), 'original content')
+
+    def test_create_backup_nonexistent_file(self):
+        """Test backup returns None for non-existent file."""
+        result = _create_backup('/nonexistent/file.exe')
+        self.assertIsNone(result)
+
+    def test_restore_backup_success(self):
+        """Test restoring from a backup."""
+        backup_path = _create_backup(self.test_exe)
+        
+        # Modify the original
+        with open(self.test_exe, 'w') as f:
+            f.write('modified content')
+        
+        # Restore
+        result = _restore_backup(backup_path, self.test_exe)
+        
+        self.assertTrue(result)
+        with open(self.test_exe) as f:
+            self.assertEqual(f.read(), 'original content')
+
+    def test_restore_backup_nonexistent(self):
+        """Test restore returns False for non-existent backup."""
+        result = _restore_backup('/nonexistent/backup', self.test_exe)
+        self.assertFalse(result)
+
+    def test_cleanup_backup(self):
+        """Test cleanup removes backup file."""
+        backup_path = _create_backup(self.test_exe)
+        self.assertTrue(os.path.exists(backup_path))
+        
+        _cleanup_backup(backup_path)
+        
+        self.assertFalse(os.path.exists(backup_path))
+
+    def test_cleanup_backup_none(self):
+        """Test cleanup handles None gracefully."""
+        # Should not raise
+        _cleanup_backup(None)
+
+
+class TestVersionValidation(unittest.TestCase):
+    """Tests for version format validation."""
+
+    @patch('updater._request_with_retry')
+    def test_rejects_invalid_version_format(self, mock_request):
+        """Test that invalid version formats are rejected."""
+        mock_response = Mock()
+        mock_response.json.return_value = {"tag_name": "latest"}  # Not a valid version
+        mock_request.return_value = mock_response
+
+        result = check_for_updates()
+
+        self.assertIsNone(result)
+
+    @patch('updater._request_with_retry')
+    def test_accepts_standard_semver(self, mock_request):
+        """Test standard semver versions are accepted."""
+        mock_response = Mock()
+        mock_response.json.return_value = {"tag_name": "v999.0.0"}
+        mock_request.return_value = mock_response
+
+        result = check_for_updates()
+
+        self.assertIsNotNone(result)
+
+    @patch('updater._request_with_retry')
+    def test_accepts_semver_with_prerelease(self, mock_request):
+        """Test semver with prerelease suffix is accepted."""
+        mock_response = Mock()
+        mock_response.json.return_value = {"tag_name": "v999.0.0-beta.1"}
+        mock_request.return_value = mock_response
+
+        result = check_for_updates()
+
+        self.assertIsNotNone(result)
+
+    @patch('updater._request_with_retry')
+    def test_downgrade_protection(self, mock_request):
+        """Test that downgrade is not offered (dev builds)."""
+        mock_response = Mock()
+        # Return a version older than current
+        mock_response.json.return_value = {"tag_name": "v0.0.1"}
+        mock_request.return_value = mock_response
+
+        result = check_for_updates()
+
+        self.assertIsNone(result)
+
+
+class TestLogging(unittest.TestCase):
+    """Tests for logging functionality."""
+
+    def test_log_does_not_raise(self):
+        """Test that logging various levels doesn't raise exceptions."""
+        # These should not raise
+        _log("info message", 'info')
+        _log("debug message", 'debug')
+        _log("warning message", 'warning')
+        _log("error message", 'error')
+
+
+class TestSourceCodeFiltering(unittest.TestCase):
+    """Tests for filtering source code archives."""
+
+    @patch('updater._show_error')
+    @patch('updater._download_with_progress')
+    def test_skips_source_zip(self, mock_download, mock_show_error):
+        """Test that source code zips are skipped."""
+        release_data = {
+            "tag_name": "v2.0.0",
+            "assets": [
+                {"name": "source-code.zip", "browser_download_url": "https://github.com/user/repo/releases/download/v2.0.0/source-code.zip"},
+                {"name": "Release.zip", "browser_download_url": "https://github.com/user/repo/releases/download/v2.0.0/Release.zip"},
+            ]
+        }
+
+        mock_download.side_effect = Exception("Test abort")
+
+        perform_update(release_data)
+
+        # Should pick Release.zip, not source-code.zip
+        call_args = mock_download.call_args
+        self.assertIn("Release.zip", call_args[0][0])
+        self.assertNotIn("source", call_args[0][0].lower())
 
 
 if __name__ == '__main__':

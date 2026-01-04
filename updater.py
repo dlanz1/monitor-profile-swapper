@@ -25,6 +25,110 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.realpath(os.path.abspath(__file__)))
 
+# Set up file-based logging for update operations
+_update_logger = None
+
+def _get_update_logger():
+    """Get or create the update logger for file-based logging."""
+    global _update_logger
+    if _update_logger is None:
+        _update_logger = logging.getLogger('updater')
+        _update_logger.setLevel(logging.DEBUG)
+        
+        # Only add handler if not already present
+        if not _update_logger.handlers:
+            try:
+                log_file = os.path.join(BASE_DIR, 'update_debug.log')
+                # Rotating log, max 1MB, keep 3 backups
+                from logging.handlers import RotatingFileHandler
+                handler = RotatingFileHandler(
+                    log_file, maxBytes=1024*1024, backupCount=3, encoding='utf-8'
+                )
+                handler.setFormatter(logging.Formatter(
+                    '%(asctime)s [%(levelname)s] %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                ))
+                _update_logger.addHandler(handler)
+            except Exception:
+                # If we can't create file handler, use null handler
+                _update_logger.addHandler(logging.NullHandler())
+    
+    return _update_logger
+
+def _log(message, level='info'):
+    """Log message to both console and file."""
+    print(f"   {message}")
+    logger = _get_update_logger()
+    if level == 'debug':
+        logger.debug(message)
+    elif level == 'warning':
+        logger.warning(message)
+    elif level == 'error':
+        logger.error(message)
+    else:
+        logger.info(message)
+
+
+def _create_backup(exe_path):
+    """
+    Create a backup of the current executable before update.
+    
+    Args:
+        exe_path: Path to current executable
+        
+    Returns:
+        Path to backup file, or None if backup failed
+    """
+    if not os.path.exists(exe_path):
+        return None
+    
+    try:
+        backup_path = exe_path + '.backup'
+        # Remove old backup if exists
+        if os.path.exists(backup_path):
+            os.remove(backup_path)
+        shutil.copy2(exe_path, backup_path)
+        _log(f"Created backup: {os.path.basename(backup_path)}")
+        return backup_path
+    except Exception as e:
+        _log(f"Warning: Could not create backup: {e}", 'warning')
+        return None
+
+
+def _restore_backup(backup_path, exe_path):
+    """
+    Restore executable from backup.
+    
+    Args:
+        backup_path: Path to backup file
+        exe_path: Path to restore to
+        
+    Returns:
+        True if restored, False otherwise
+    """
+    if not backup_path or not os.path.exists(backup_path):
+        return False
+    
+    try:
+        if os.path.exists(exe_path):
+            os.remove(exe_path)
+        shutil.copy2(backup_path, exe_path)
+        _log(f"Restored from backup: {os.path.basename(exe_path)}")
+        return True
+    except Exception as e:
+        _log(f"Failed to restore backup: {e}", 'error')
+        return False
+
+
+def _cleanup_backup(backup_path):
+    """Remove backup file after successful update."""
+    if backup_path and os.path.exists(backup_path):
+        try:
+            os.remove(backup_path)
+        except Exception:
+            pass  # Best effort cleanup
+
+
 def _remove_readonly(func, path, excinfo):
     """Error handler for shutil.rmtree to handle read-only files on Windows."""
     os.chmod(path, stat.S_IWRITE)
@@ -374,7 +478,7 @@ def _verify_checksum(file_path, expected_hash):
     return actual_hash == expected_hash.lower()
 
 
-def _download_with_progress(url, dest_path, progress_callback=None):
+def _download_with_progress(url, dest_path, progress_callback=None, overall_timeout=300):
     """
     Download a file with optional progress callback.
     Uses retry logic for network resilience.
@@ -383,6 +487,7 @@ def _download_with_progress(url, dest_path, progress_callback=None):
         url: URL to download from
         dest_path: Destination file path
         progress_callback: Optional function(downloaded_bytes, total_bytes)
+        overall_timeout: Maximum seconds for entire download (default 5 minutes)
         
     Returns:
         True on success
@@ -390,33 +495,54 @@ def _download_with_progress(url, dest_path, progress_callback=None):
     Raises:
         Exception on failure
     """
-    response = _request_with_retry(url, timeout=60, stream=True)
-    total_size = int(response.headers.get('content-length', 0))
+    response = None
+    start_time = time.time()
     
-    # Sanity check: reject suspiciously large downloads
-    if total_size > MAX_DOWNLOAD_SIZE:
-        raise ValueError(f"Download size ({total_size / 1024 / 1024:.1f} MB) exceeds maximum allowed ({MAX_DOWNLOAD_SIZE / 1024 / 1024:.1f} MB)")
-    
-    downloaded = 0
-    
-    with open(dest_path, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-                downloaded += len(chunk)
+    try:
+        response = _request_with_retry(url, timeout=60, stream=True)
+        total_size = int(response.headers.get('content-length', 0))
+        
+        # Sanity check: reject suspiciously large downloads
+        if total_size > MAX_DOWNLOAD_SIZE:
+            raise ValueError(f"Download size ({total_size / 1024 / 1024:.1f} MB) exceeds maximum allowed ({MAX_DOWNLOAD_SIZE / 1024 / 1024:.1f} MB)")
+        
+        # Sanity check: reject zero-size content-length if specified
+        if response.headers.get('content-length') and total_size == 0:
+            raise ValueError("Server returned empty Content-Length")
+        
+        downloaded = 0
+        
+        with open(dest_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                # Check overall timeout
+                if time.time() - start_time > overall_timeout:
+                    raise TimeoutError(f"Download timed out after {overall_timeout} seconds")
                 
-                # Additional safety: abort if we're downloading way more than expected
-                if total_size > 0 and downloaded > total_size * 1.1:  # 10% tolerance
-                    raise IOError(f"Download exceeded expected size: got {downloaded} bytes, expected {total_size}")
-                
-                if progress_callback and total_size > 0:
-                    progress_callback(downloaded, total_size)
-    
-    # Verify we downloaded the expected amount
-    if total_size > 0 and downloaded != total_size:
-        raise IOError(f"Incomplete download: got {downloaded} bytes, expected {total_size}")
-    
-    return True
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    # Additional safety: abort if we're downloading way more than expected
+                    if total_size > 0 and downloaded > total_size * 1.1:  # 10% tolerance
+                        raise IOError(f"Download exceeded expected size: got {downloaded} bytes, expected {total_size}")
+                    
+                    if progress_callback and total_size > 0:
+                        progress_callback(downloaded, total_size)
+        
+        # Verify we downloaded the expected amount
+        if total_size > 0 and downloaded != total_size:
+            raise IOError(f"Incomplete download: got {downloaded} bytes, expected {total_size}")
+        
+        _log(f"Downloaded {downloaded / 1024 / 1024:.1f} MB in {time.time() - start_time:.1f}s", 'debug')
+        return True
+        
+    finally:
+        # Ensure response stream is properly closed
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
 
 
 def _flatten_nested_folder(extract_folder):
@@ -471,6 +597,8 @@ def check_for_updates():
     Uses retry logic for network resilience.
     """
     print(f"Checking for updates... (Current: {CURRENT_VERSION})")
+    _log(f"Update check started (current: {CURRENT_VERSION})", 'info')
+    
     try:
         url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest"
         
@@ -482,11 +610,14 @@ def check_for_updates():
                 remaining = e.response.headers.get('X-RateLimit-Remaining', 'unknown')
                 if remaining == '0':
                     print(f"   Update check skipped: GitHub API rate limit exceeded.")
+                    _log("Update check skipped: rate limit exceeded", 'warning')
                     return None
             print(f"   Update check failed: {e}")
+            _log(f"Update check HTTP error: {e}", 'error')
             return None
         except requests.exceptions.RequestException as e:
             print(f"   Update check failed after retries: {e}")
+            _log(f"Update check network error: {e}", 'error')
             return None
             
         data = response.json()
@@ -494,21 +625,40 @@ def check_for_updates():
         
         if not latest_tag:
             print("   Update check failed: No tag_name in release data.")
+            _log("No tag_name in release data", 'warning')
             return None
         
         # Clean versions for comparison (remove 'v')
         curr_ver_clean = CURRENT_VERSION.lstrip('v')
         latest_ver_clean = latest_tag.lstrip('v')
+        
+        # Validate version format looks reasonable (basic semver-like pattern)
+        semver_pattern = r'^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9._-]+)?$'
+        if not re.match(semver_pattern, latest_ver_clean):
+            print(f"   Warning: Unusual version format '{latest_tag}', skipping")
+            _log(f"Unusual version format: {latest_tag}", 'warning')
+            return None
 
         try:
-            if version.parse(latest_ver_clean) > version.parse(curr_ver_clean):
+            parsed_current = version.parse(curr_ver_clean)
+            parsed_latest = version.parse(latest_ver_clean)
+            
+            if parsed_latest > parsed_current:
                 print(f"   >>> Update Found: {latest_tag}")
+                _log(f"Update available: {CURRENT_VERSION} -> {latest_tag}", 'info')
                 return data
+            elif parsed_latest < parsed_current:
+                # Downgrade protection - current is newer than "latest"
+                print(f"   Running version newer than latest release (dev build?)")
+                _log(f"Current {curr_ver_clean} > latest {latest_ver_clean}", 'debug')
+                return None
         except Exception as ve:
             print(f"   Warning: Could not parse version '{latest_tag}': {ve}")
+            _log(f"Version parse error: {ve}", 'warning')
             return None
         
         print("   Up to date.")
+        _log("No update needed", 'debug')
         return None
     except Exception as e:
         print(f"   Update check error: {e}")
@@ -558,9 +708,10 @@ def perform_update(release_data):
         return False
     
     print(f"   Disk space check passed ({free_bytes / 1024 / 1024:.1f} MB available)")
+    _log(f"Starting update to {tag_name}", 'info')
     
     # 1. Find the correct asset (.zip) and optional checksum
-    # Prefer "Release.zip" or similar named packages
+    # Prefer "Release.zip" or similar named packages, skip source code
     asset_url = None
     asset_name = None
     fallback_url = None
@@ -568,29 +719,48 @@ def perform_update(release_data):
     checksum_url = None
     expected_checksum = None
     
+    # Patterns that indicate source code (should be skipped)
+    source_patterns = ['source', 'src', '-source-', '.tar.gz']
+    
     for asset in release_data.get("assets", []):
         name = asset.get("name", "")
+        download_url = asset.get("browser_download_url", "")
+        
+        _log(f"Evaluating asset: {name}", 'debug')
         
         # Look for checksum file (common patterns: sha256.txt, CHECKSUMS.txt, *.sha256)
         if name.lower() in ('sha256.txt', 'checksums.txt', 'sha256sums.txt') or name.endswith('.sha256'):
-            checksum_url = asset.get("browser_download_url")
+            checksum_url = download_url
+            _log(f"Found checksum file: {name}", 'debug')
+            continue
+        
+        # Skip non-zip files
+        if not name.endswith(".zip"):
+            continue
+        
+        # Skip source code archives
+        name_lower = name.lower()
+        if any(pattern in name_lower for pattern in source_patterns):
+            _log(f"Skipping source archive: {name}", 'debug')
             continue
             
-        if name.endswith(".zip"):
-            # Prefer Release.zip or monitor-profile-swapper*.zip over generic zips
-            if "release" in name.lower() or REPO_NAME.lower() in name.lower():
-                asset_url = asset["browser_download_url"]
-                asset_name = name
-                # Don't break - keep looking for checksum file
-            elif fallback_url is None:
-                # Store first .zip as fallback
-                fallback_url = asset["browser_download_url"]
-                fallback_name = name
+        # Prefer Release.zip or monitor-profile-swapper*.zip over generic zips
+        if "release" in name_lower or REPO_NAME.lower() in name_lower:
+            asset_url = download_url
+            asset_name = name
+            _log(f"Selected preferred asset: {name}", 'debug')
+            # Don't break - keep looking for checksum file
+        elif fallback_url is None:
+            # Store first .zip as fallback
+            fallback_url = download_url
+            fallback_name = name
+            _log(f"Stored fallback asset: {name}", 'debug')
     
     # Use fallback if no preferred asset found
     if not asset_url and fallback_url:
         asset_url = fallback_url
         asset_name = fallback_name
+        _log(f"Using fallback asset: {asset_name}", 'debug')
     
     if not asset_url:
         error_msg = "No .zip asset found in release. Please update manually."
