@@ -29,12 +29,19 @@ from updater import (
     _verify_checksum,
     _flatten_nested_folder,
     _remove_readonly,
+    _is_valid_url,
+    _is_valid_checksum,
+    _validate_release_data,
+    _escape_batch_path,
+    _check_disk_space,
+    _is_writable,
     check_for_updates,
     perform_update,
     cleanup_update_artifacts,
     PathTraversalError,
     safe_extract,
     CURRENT_VERSION,
+    MAX_DOWNLOAD_SIZE,
 )
 
 
@@ -360,8 +367,8 @@ class TestPerformUpdate(unittest.TestCase):
         release_data = {
             "tag_name": "v2.0.0",
             "assets": [
-                {"name": "source.zip", "browser_download_url": "http://example.com/source.zip"},
-                {"name": "Release.zip", "browser_download_url": "http://example.com/release.zip"},
+                {"name": "source.zip", "browser_download_url": "https://github.com/user/repo/releases/download/v2.0.0/source.zip"},
+                {"name": "Release.zip", "browser_download_url": "https://github.com/user/repo/releases/download/v2.0.0/Release.zip"},
             ]
         }
 
@@ -370,26 +377,28 @@ class TestPerformUpdate(unittest.TestCase):
 
         perform_update(release_data)
 
-        # Verify the correct URL was used
+        # Verify the correct URL was used (Release.zip preferred)
         call_args = mock_download.call_args
-        self.assertIn("release.zip", call_args[0][0])
+        self.assertIn("Release.zip", call_args[0][0])
 
     @patch('updater._show_error')
     @patch('updater._download_with_progress')
     @patch('updater._request_with_retry')
     def test_fetches_checksum_file(self, mock_request, mock_download, mock_show_error):
         """Test that checksum file is fetched when available."""
+        # Use valid SHA256 hash format (64 hex chars)
+        valid_checksum = "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f"
         release_data = {
             "tag_name": "v2.0.0",
             "assets": [
-                {"name": "sha256.txt", "browser_download_url": "http://example.com/sha256.txt"},
-                {"name": "Release.zip", "browser_download_url": "http://example.com/release.zip"},
+                {"name": "sha256.txt", "browser_download_url": "https://github.com/user/repo/releases/download/v2.0.0/sha256.txt"},
+                {"name": "Release.zip", "browser_download_url": "https://github.com/user/repo/releases/download/v2.0.0/Release.zip"},
             ]
         }
 
-        # Mock checksum response
+        # Mock checksum response with valid SHA256 format
         mock_checksum_response = Mock()
-        mock_checksum_response.text = "abcd1234  Release.zip"
+        mock_checksum_response.text = f"{valid_checksum}  Release.zip"
         mock_request.return_value = mock_checksum_response
 
         # Make download fail to abort early
@@ -397,7 +406,7 @@ class TestPerformUpdate(unittest.TestCase):
 
         perform_update(release_data)
 
-        # Verify checksum was fetched
+        # Verify checksum was fetched (at least one call to _request_with_retry)
         mock_request.assert_called()
 
 
@@ -538,6 +547,198 @@ class TestDownloadWithProgress(unittest.TestCase):
         self.assertGreater(len(progress_calls), 0)
         # Last call should have full size
         self.assertEqual(progress_calls[-1][0], 100)
+
+
+class TestUrlValidation(unittest.TestCase):
+    """Tests for URL validation."""
+
+    def test_valid_github_url(self):
+        """Test valid GitHub HTTPS URL."""
+        url = "https://github.com/user/repo/releases/download/v1.0/file.zip"
+        self.assertTrue(_is_valid_url(url))
+
+    def test_valid_githubusercontent_url(self):
+        """Test valid GitHub raw content URL."""
+        url = "https://raw.githubusercontent.com/user/repo/main/file.txt"
+        self.assertTrue(_is_valid_url(url))
+
+    def test_invalid_http_url(self):
+        """Test that HTTP (non-HTTPS) is rejected."""
+        url = "http://github.com/user/repo/releases/download/v1.0/file.zip"
+        self.assertFalse(_is_valid_url(url))
+
+    def test_invalid_non_github_url(self):
+        """Test that non-GitHub URLs are rejected."""
+        url = "https://example.com/file.zip"
+        self.assertFalse(_is_valid_url(url))
+
+    def test_invalid_empty_url(self):
+        """Test empty URL."""
+        self.assertFalse(_is_valid_url(""))
+        self.assertFalse(_is_valid_url(None))
+
+    def test_invalid_url_no_path(self):
+        """Test URL with no path."""
+        url = "https://github.com/"
+        self.assertFalse(_is_valid_url(url))
+
+
+class TestChecksumFormatValidation(unittest.TestCase):
+    """Tests for checksum format validation."""
+
+    def test_valid_sha256(self):
+        """Test valid SHA256 hash."""
+        checksum = "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f"
+        self.assertTrue(_is_valid_checksum(checksum))
+
+    def test_valid_sha256_uppercase(self):
+        """Test valid SHA256 hash in uppercase."""
+        checksum = "DFFD6021BB2BD5B0AF676290809EC3A53191DD81C7F70A4B28688A362182986F"
+        self.assertTrue(_is_valid_checksum(checksum))
+
+    def test_invalid_too_short(self):
+        """Test checksum that's too short."""
+        checksum = "abcd1234"
+        self.assertFalse(_is_valid_checksum(checksum))
+
+    def test_invalid_too_long(self):
+        """Test checksum that's too long."""
+        checksum = "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f0000"
+        self.assertFalse(_is_valid_checksum(checksum))
+
+    def test_invalid_non_hex(self):
+        """Test checksum with non-hex characters."""
+        checksum = "gggg6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f"
+        self.assertFalse(_is_valid_checksum(checksum))
+
+    def test_invalid_empty(self):
+        """Test empty checksum."""
+        self.assertFalse(_is_valid_checksum(""))
+        self.assertFalse(_is_valid_checksum(None))
+
+
+class TestReleaseDataValidation(unittest.TestCase):
+    """Tests for release data validation."""
+
+    def test_valid_release_data(self):
+        """Test valid release data."""
+        data = {"tag_name": "v1.5.0", "assets": []}
+        is_valid, error = _validate_release_data(data)
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    def test_invalid_not_dict(self):
+        """Test non-dict release data."""
+        is_valid, error = _validate_release_data("string")
+        self.assertFalse(is_valid)
+        self.assertIn("format", error.lower())
+
+    def test_invalid_missing_tag_name(self):
+        """Test release data without tag_name."""
+        data = {"assets": []}
+        is_valid, error = _validate_release_data(data)
+        self.assertFalse(is_valid)
+        self.assertIn("tag_name", error.lower())
+
+    def test_invalid_special_chars_in_tag(self):
+        """Test tag_name with special characters."""
+        data = {"tag_name": "v1.0<script>alert(1)</script>"}
+        is_valid, error = _validate_release_data(data)
+        self.assertFalse(is_valid)
+        self.assertIn("invalid", error.lower())
+
+    def test_valid_tag_with_hyphen_underscore_dot(self):
+        """Test tag_name with allowed special chars."""
+        data = {"tag_name": "v1.5.0-beta_1", "assets": []}
+        is_valid, error = _validate_release_data(data)
+        self.assertTrue(is_valid)
+
+
+class TestBatchPathEscaping(unittest.TestCase):
+    """Tests for batch script path escaping."""
+
+    def test_escape_percent(self):
+        """Test escaping percent sign."""
+        path = "C:\\100%\\folder"
+        escaped = _escape_batch_path(path)
+        self.assertEqual(escaped, "C:\\100%%\\folder")
+
+    def test_escape_ampersand(self):
+        """Test escaping ampersand."""
+        path = "C:\\Tom & Jerry\\folder"
+        escaped = _escape_batch_path(path)
+        self.assertIn("^&", escaped)
+
+    def test_escape_exclamation(self):
+        """Test escaping exclamation mark."""
+        path = "C:\\Important!\\folder"
+        escaped = _escape_batch_path(path)
+        self.assertIn("^!", escaped)
+
+    def test_escape_caret(self):
+        """Test escaping caret."""
+        path = "C:\\Test^Folder"
+        escaped = _escape_batch_path(path)
+        self.assertIn("^^", escaped)
+
+    def test_normal_path_unchanged(self):
+        """Test that normal paths pass through."""
+        path = "C:\\Users\\Test\\AppData\\Local\\MonitorSwapper"
+        escaped = _escape_batch_path(path)
+        self.assertEqual(escaped, path)
+
+
+class TestDiskSpaceCheck(unittest.TestCase):
+    """Tests for disk space checking."""
+
+    def test_check_disk_space_returns_tuple(self):
+        """Test that check returns a tuple."""
+        result = _check_disk_space(tempfile.gettempdir())
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+
+    def test_disk_space_has_enough(self):
+        """Test check with small required space."""
+        has_space, free_bytes = _check_disk_space(tempfile.gettempdir(), required_bytes=1)
+        self.assertTrue(has_space)
+        self.assertGreater(free_bytes, 0)
+
+    def test_disk_space_not_enough(self):
+        """Test check with impossibly large required space."""
+        # 1 exabyte should be more than any disk
+        has_space, free_bytes = _check_disk_space(tempfile.gettempdir(), required_bytes=10**18)
+        self.assertFalse(has_space)
+
+
+class TestWritabilityCheck(unittest.TestCase):
+    """Tests for directory writability checking."""
+
+    def test_writable_directory(self):
+        """Test writable temp directory."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(_is_writable(tmp))
+
+    def test_nonexistent_directory(self):
+        """Test non-existent directory."""
+        self.assertFalse(_is_writable("/nonexistent/path/12345"))
+
+
+class TestDownloadSizeLimit(unittest.TestCase):
+    """Tests for download size limit."""
+
+    @patch('updater._request_with_retry')
+    def test_rejects_oversized_download(self, mock_request):
+        """Test that downloads over MAX_DOWNLOAD_SIZE are rejected."""
+        mock_response = Mock()
+        # Set content-length to more than MAX_DOWNLOAD_SIZE
+        mock_response.headers = {'content-length': str(MAX_DOWNLOAD_SIZE + 1000)}
+        mock_request.return_value = mock_response
+
+        from updater import _download_with_progress
+        with self.assertRaises(ValueError) as cm:
+            _download_with_progress("https://example.com/file", "/tmp/test.zip")
+
+        self.assertIn("exceeds maximum", str(cm.exception))
 
 
 if __name__ == '__main__':

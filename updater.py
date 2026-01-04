@@ -9,6 +9,8 @@ import stat
 import re
 import hashlib
 import random
+import logging
+from urllib.parse import urlparse
 from packaging import version
 
 # Current version of the application
@@ -29,9 +31,20 @@ def _remove_readonly(func, path, excinfo):
     func(path)
 
 def _escape_batch_path(path):
-    """Escape special characters in paths for batch script safety."""
+    """
+    Escape special characters in paths for batch script safety.
+    Handles: %, !, ^, & which have special meaning in batch scripts.
+    """
     # Replace problematic batch characters
-    return path.replace('%', '%%')
+    # % must be doubled in batch scripts
+    path = path.replace('%', '%%')
+    # ^ is the escape character in batch, must be doubled
+    path = path.replace('^', '^^')
+    # & separates commands, needs escaping when in paths
+    path = path.replace('&', '^&')
+    # ! is used in delayed expansion, escape it
+    path = path.replace('!', '^!')
+    return path
 
 def cleanup_update_artifacts():
     """
@@ -143,6 +156,150 @@ def _show_info(title, message):
             pass
 
 
+# Maximum allowed download size (500 MB) - sanity check against corrupted Content-Length
+MAX_DOWNLOAD_SIZE = 500 * 1024 * 1024
+
+# Minimum required free disk space (100 MB) for update
+MIN_FREE_SPACE = 100 * 1024 * 1024
+
+
+def _is_valid_url(url):
+    """
+    Validate that a URL is a valid HTTPS URL from GitHub.
+    
+    Args:
+        url: URL string to validate
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    if not url or not isinstance(url, str):
+        return False
+    
+    try:
+        parsed = urlparse(url)
+        # Must be HTTPS
+        if parsed.scheme != 'https':
+            return False
+        # Must be from GitHub
+        if not parsed.netloc.endswith('github.com') and not parsed.netloc.endswith('githubusercontent.com'):
+            return False
+        # Must have a path
+        if not parsed.path or parsed.path == '/':
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _is_valid_checksum(checksum):
+    """
+    Validate that a checksum string is a valid SHA256 hash.
+    
+    Args:
+        checksum: Checksum string to validate
+        
+    Returns:
+        True if valid SHA256 format, False otherwise
+    """
+    if not checksum or not isinstance(checksum, str):
+        return False
+    
+    # SHA256 is exactly 64 hex characters
+    checksum = checksum.strip().lower()
+    if len(checksum) != 64:
+        return False
+    
+    # Must be valid hex
+    try:
+        int(checksum, 16)
+        return True
+    except ValueError:
+        return False
+
+
+def _check_disk_space(path, required_bytes=MIN_FREE_SPACE):
+    """
+    Check if there's enough free disk space at the given path.
+    
+    Args:
+        path: Path to check disk space for
+        required_bytes: Minimum required free space in bytes
+        
+    Returns:
+        Tuple of (has_enough_space: bool, free_bytes: int)
+    """
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            free_bytes = ctypes.c_ulonglong(0)
+            ctypes.windll.kernel32.GetDiskFreeSpaceExW(
+                ctypes.c_wchar_p(path), None, None, ctypes.pointer(free_bytes)
+            )
+            free = free_bytes.value
+        else:
+            # Unix/Mac
+            st = os.statvfs(path)
+            free = st.f_bavail * st.f_frsize
+        
+        return (free >= required_bytes, free)
+    except Exception as e:
+        print(f"   Warning: Could not check disk space: {e}")
+        # If we can't check, assume it's fine
+        return (True, 0)
+
+
+def _is_writable(path):
+    """
+    Check if a directory is writable.
+    
+    Args:
+        path: Directory path to check
+        
+    Returns:
+        True if writable, False otherwise
+    """
+    try:
+        test_file = os.path.join(path, '.update_write_test')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+        return True
+    except Exception:
+        return False
+
+
+def _validate_release_data(release_data):
+    """
+    Validate that release data from GitHub API is well-formed.
+    
+    Args:
+        release_data: Dict from GitHub releases API
+        
+    Returns:
+        Tuple of (is_valid: bool, error_message: str or None)
+    """
+    if not isinstance(release_data, dict):
+        return (False, "Invalid release data format")
+    
+    if 'tag_name' not in release_data:
+        return (False, "Release data missing tag_name")
+    
+    tag = release_data.get('tag_name')
+    if not tag or not isinstance(tag, str):
+        return (False, "Invalid tag_name in release data")
+    
+    # Sanitize tag_name - should only contain safe characters
+    if not re.match(r'^[a-zA-Z0-9._-]+$', tag):
+        return (False, f"Invalid characters in tag_name: {tag[:50]}")
+    
+    assets = release_data.get('assets')
+    if assets is not None and not isinstance(assets, list):
+        return (False, "Invalid assets format in release data")
+    
+    return (True, None)
+
+
 def _request_with_retry(url, max_retries=3, timeout=10, stream=False):
     """
     Make HTTP GET request with exponential backoff retry.
@@ -161,9 +318,14 @@ def _request_with_retry(url, max_retries=3, timeout=10, stream=False):
     """
     last_exception = None
     
+    # Use proper User-Agent to avoid being blocked as a bot
+    headers = {
+        'User-Agent': f'MonitorProfileSwapper/{CURRENT_VERSION} (https://github.com/{REPO_OWNER}/{REPO_NAME})'
+    }
+    
     for attempt in range(max_retries):
         try:
-            response = requests.get(url, timeout=timeout, stream=stream)
+            response = requests.get(url, timeout=timeout, stream=stream, headers=headers)
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException as e:
@@ -230,6 +392,11 @@ def _download_with_progress(url, dest_path, progress_callback=None):
     """
     response = _request_with_retry(url, timeout=60, stream=True)
     total_size = int(response.headers.get('content-length', 0))
+    
+    # Sanity check: reject suspiciously large downloads
+    if total_size > MAX_DOWNLOAD_SIZE:
+        raise ValueError(f"Download size ({total_size / 1024 / 1024:.1f} MB) exceeds maximum allowed ({MAX_DOWNLOAD_SIZE / 1024 / 1024:.1f} MB)")
+    
     downloaded = 0
     
     with open(dest_path, 'wb') as f:
@@ -237,6 +404,11 @@ def _download_with_progress(url, dest_path, progress_callback=None):
             if chunk:
                 f.write(chunk)
                 downloaded += len(chunk)
+                
+                # Additional safety: abort if we're downloading way more than expected
+                if total_size > 0 and downloaded > total_size * 1.1:  # 10% tolerance
+                    raise IOError(f"Download exceeded expected size: got {downloaded} bytes, expected {total_size}")
+                
                 if progress_callback and total_size > 0:
                     progress_callback(downloaded, total_size)
     
@@ -349,13 +521,43 @@ def perform_update(release_data):
     to overwrite the current files and restart the application.
     
     Includes:
+    - Input validation and sanity checks
+    - Disk space verification
     - Network retry with exponential backoff
     - SHA256 checksum verification (if available)
     - Nested folder structure flattening for GitHub releases
     - User-visible error messages for frozen executables
     """
+    # === VALIDATION PHASE ===
+    
+    # Validate release data structure
+    is_valid, error_msg = _validate_release_data(release_data)
+    if not is_valid:
+        print(f"   Error: {error_msg}")
+        _show_error("Update Failed", f"Invalid release data received.\n\n{error_msg}")
+        return False
+    
     tag_name = release_data.get('tag_name', 'Unknown')
     print(f"Initializing update to {tag_name}...")
+    
+    # Check if BASE_DIR is writable
+    if not _is_writable(BASE_DIR):
+        error_msg = f"Cannot write to installation directory:\n{BASE_DIR}\n\nPlease check folder permissions or run as Administrator."
+        print(f"   Error: Directory not writable: {BASE_DIR}")
+        _show_error("Update Failed - Permission Denied", error_msg)
+        return False
+    
+    # Check available disk space
+    has_space, free_bytes = _check_disk_space(BASE_DIR)
+    if not has_space:
+        free_mb = free_bytes / 1024 / 1024
+        required_mb = MIN_FREE_SPACE / 1024 / 1024
+        error_msg = f"Not enough disk space for update.\n\nAvailable: {free_mb:.1f} MB\nRequired: {required_mb:.1f} MB\n\nPlease free up some disk space and try again."
+        print(f"   Error: Insufficient disk space ({free_mb:.1f} MB available)")
+        _show_error("Update Failed - Disk Space", error_msg)
+        return False
+    
+    print(f"   Disk space check passed ({free_bytes / 1024 / 1024:.1f} MB available)")
     
     # 1. Find the correct asset (.zip) and optional checksum
     # Prefer "Release.zip" or similar named packages
@@ -396,26 +598,42 @@ def perform_update(release_data):
         _show_error("Update Failed", error_msg)
         return False
     
+    # Validate the asset URL is a valid GitHub HTTPS URL
+    if not _is_valid_url(asset_url):
+        error_msg = f"Invalid or unsafe download URL detected.\n\nURL: {asset_url[:100]}..."
+        print(f"   Error: Invalid asset URL: {asset_url}")
+        _show_error("Update Failed - Security", error_msg)
+        return False
+    
     print(f"   Found update package: {asset_name}")
     
     # 1b. Try to fetch checksum if available
     if checksum_url:
         try:
-            print("   Fetching checksum file...")
-            checksum_response = _request_with_retry(checksum_url, max_retries=2, timeout=10)
-            checksum_content = checksum_response.text.strip()
-            # Parse checksum file - typically format: "hash  filename" or just "hash"
-            for line in checksum_content.split('\n'):
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                parts = line.split()
-                if len(parts) >= 1:
-                    # Check if this line is for our asset
-                    if len(parts) == 1 or (len(parts) >= 2 and asset_name in parts[-1]):
-                        expected_checksum = parts[0]
-                        print(f"   Found checksum: {expected_checksum[:16]}...")
-                        break
+            # Validate checksum URL first
+            if not _is_valid_url(checksum_url):
+                print(f"   Warning: Invalid checksum URL, skipping verification")
+            else:
+                print("   Fetching checksum file...")
+                checksum_response = _request_with_retry(checksum_url, max_retries=2, timeout=10)
+                checksum_content = checksum_response.text.strip()
+                # Parse checksum file - typically format: "hash  filename" or just "hash"
+                for line in checksum_content.split('\n'):
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 1:
+                        # Check if this line is for our asset
+                        if len(parts) == 1 or (len(parts) >= 2 and asset_name in parts[-1]):
+                            candidate_checksum = parts[0]
+                            # Validate checksum format (must be valid SHA256)
+                            if _is_valid_checksum(candidate_checksum):
+                                expected_checksum = candidate_checksum
+                                print(f"   Found checksum: {expected_checksum[:16]}...")
+                            else:
+                                print(f"   Warning: Invalid checksum format: {candidate_checksum[:32]}...")
+                            break
         except Exception as e:
             print(f"   Warning: Could not fetch checksum ({e}). Proceeding without verification.")
             expected_checksum = None
@@ -498,6 +716,13 @@ def perform_update(release_data):
         # Flatten nested folder structure if present (common in GitHub releases)
         _flatten_nested_folder(extract_folder)
         
+        # Verify extraction produced files
+        extracted_files = os.listdir(extract_folder)
+        if not extracted_files:
+            raise IOError("Extraction produced no files")
+        
+        print(f"   Extracted {len(extracted_files)} items successfully.")
+        
     except zipfile.BadZipFile:
         error_msg = "Extraction failed: Corrupt or invalid ZIP file."
         print(f"   {error_msg}")
@@ -514,7 +739,8 @@ def perform_update(release_data):
         _show_error("Update Failed", f"Could not extract update package.\n\n{e}")
         return False
 
-
+    # === BATCH SCRIPT PHASE ===
+    
     # 4. Create Batch Script for atomic swap
     exe_name = os.path.basename(sys.executable)
     if not getattr(sys, 'frozen', False):
@@ -529,7 +755,7 @@ def perform_update(release_data):
             print(f"   [DEV] Cleanup warning: {e}")
         return True
 
-    print("   Scheduling restart...")
+    print("   Preparing update script...")
     
     exe_path = sys.executable
     settings_path = os.path.join(BASE_DIR, "Settings.exe")
@@ -556,55 +782,135 @@ def perform_update(release_data):
 
     # CRITICAL: We clear all MEI related variables. 
     # Using 'start /i' or a fresh 'cmd /c' helps ensure environment isolation.
+    # Batch script includes additional safety checks:
+    # - Longer timeout to ensure processes fully exit
+    # - Verification that the executable exists after update
+    # - Clear error messages for common failure modes
     batch_script = f"""@echo off
+setlocal EnableDelayedExpansion
+
 echo [{timestamp}] Starting update... > "{log_path_safe}"
-echo Finalizing update...
+echo ============================================
+echo    Monitor Profile Swapper - Update
+echo ============================================
+echo.
+echo Finalizing update, please wait...
+
+REM Kill running processes
+echo [{timestamp}] Terminating running processes... >> "{log_path_safe}"
 taskkill /F /IM "{exe_name}" /T > NUL 2>&1
 taskkill /F /IM Settings.exe /T > NUL 2>&1
-timeout /t 3 /nobreak > NUL
 
-echo Updating files in {base_dir_safe}...
+REM Wait for processes to fully exit (increased from 3 to 5 seconds)
+echo Waiting for processes to exit...
+timeout /t 5 /nobreak > NUL
+
+echo.
+echo Updating files...
 echo [{timestamp}] Running robocopy... >> "{log_path_safe}"
 cd /d "{base_dir_safe}"
-robocopy "{extract_folder_safe}" "{base_dir_safe}" /E /IS /IT /NP /R:3 /W:5 >> "{log_path_safe}"
+robocopy "{extract_folder_safe}" "{base_dir_safe}" /E /IS /IT /NP /R:5 /W:3 >> "{log_path_safe}" 2>&1
 
-set ROBO_EXIT=%%errorlevel%%
-echo [{timestamp}] Robocopy exit code: %%ROBO_EXIT%% >> "{log_path_safe}"
+set ROBO_EXIT=%errorlevel%
+echo [{timestamp}] Robocopy exit code: %ROBO_EXIT% >> "{log_path_safe}"
 
-if %%ROBO_EXIT%% geq 8 (
-    echo Update failed! Check update_log.txt
-    echo [{timestamp}] Robocopy failed with exit code %%ROBO_EXIT%% >> "{log_path_safe}"
+REM Robocopy exit codes: 0-7 are success, 8+ are errors
+if %ROBO_EXIT% geq 8 (
+    echo.
+    echo ============================================
+    echo    UPDATE FAILED
+    echo ============================================
+    echo.
+    echo Robocopy error code: %ROBO_EXIT%
+    echo.
+    echo Error codes:
+    echo   8 = Some files could not be copied
+    echo   16 = Serious error, no files copied
+    echo.
+    echo Check update_log.txt for details.
+    echo [{timestamp}] FAILED: Robocopy error %ROBO_EXIT% >> "{log_path_safe}"
     pause
     exit /b 1
 )
 
-echo Cleaning up...
+REM Verify the executable exists after update
+if not exist "{exe_path_safe}" (
+    echo.
+    echo ============================================
+    echo    UPDATE FAILED - Executable Missing
+    echo ============================================
+    echo.
+    echo The application executable was not found after update.
+    echo Expected: {exe_path_safe}
+    echo.
+    echo Please re-download the application from GitHub.
+    echo [{timestamp}] FAILED: Executable not found after update >> "{log_path_safe}"
+    pause
+    exit /b 1
+)
+
+echo.
+echo Cleaning up temporary files...
+echo [{timestamp}] Cleaning up... >> "{log_path_safe}"
 rmdir /S /Q "{extract_folder_safe}" 2>NUL
 del "{zip_path_safe}" 2>NUL
 
+REM Small pause to ensure file handles are released
+timeout /t 1 /nobreak > NUL
+
+echo.
+echo ============================================
+echo    UPDATE COMPLETE!
+echo ============================================
+echo.
 echo Restarting application...
 echo [{timestamp}] Restarting MonitorSwapper... >> "{log_path_safe}"
+
+REM Clear PyInstaller MEI environment variables
 set _MEIPASS=
 set _MEI=
+
+REM Start the updated application
 start "" "{exe_path_safe}"
 {settings_launch}
 
-echo [{timestamp}] Update process finished. >> "{log_path_safe}"
-(goto) 2>nul & del "%%~f0"
+echo [{timestamp}] Update process finished successfully. >> "{log_path_safe}"
+
+REM Self-delete the batch file
+(goto) 2>nul & del "%~f0"
 """
     
     try:
-        with open(bat_path, "w") as f:
+        with open(bat_path, "w", encoding='utf-8') as f:
             f.write(batch_script)
+        
+        # Verify the batch script was written correctly
+        if not os.path.exists(bat_path):
+            raise IOError("Batch script file was not created")
+        
+        # Verify file size is reasonable (at least 500 bytes)
+        bat_size = os.path.getsize(bat_path)
+        if bat_size < 500:
+            raise IOError(f"Batch script file is too small ({bat_size} bytes)")
+        
+        print(f"   Update script created: {bat_path}")
+        
     except Exception as e:
-        print(f"   Error: Failed to create update script: {e}")
+        error_msg = f"Failed to create update script: {e}"
+        print(f"   Error: {error_msg}")
+        _show_error("Update Failed", f"Could not create update script.\n\n{e}")
         return False
 
     # 5. Launch Batch and Exit
+    print("   Launching update script and exiting...")
     try:
         os.startfile(bat_path)
     except Exception as e:
-        print(f"   Error: Failed to launch update script: {e}")
+        error_msg = f"Failed to launch update script: {e}"
+        print(f"   Error: {error_msg}")
+        _show_error("Update Failed", f"Could not launch update script.\n\n{e}")
         return False
     
+    print("   Update will complete after restart.")
     sys.exit(0)
+
