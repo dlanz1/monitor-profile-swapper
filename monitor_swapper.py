@@ -6,8 +6,12 @@ import sys
 import threading
 import subprocess
 import ctypes
-import ctypes.wintypes
-import winreg
+try:
+    import ctypes.wintypes
+    import winreg
+except ImportError:
+    # Fallback for non-Windows platforms (primarily for unit testing)
+    winreg = None
 import webbrowser
 import logging
 from logging.handlers import RotatingFileHandler
@@ -81,26 +85,37 @@ class SingleInstanceMutex:
         
     def acquire(self):
         """Attempt to acquire the mutex. Returns True if successful (first instance)."""
-        kernel32 = ctypes.windll.kernel32
-        self.mutex_handle = kernel32.CreateMutexW(None, True, self.mutex_name)
-        last_error = kernel32.GetLastError()
-        
-        if last_error == ERROR_ALREADY_EXISTS:
-            logger.warning("Another instance is already running!")
-            return False
-        
-        if self.mutex_handle is None:
-            logger.error(f"Failed to create mutex: error code {last_error}")
-            return False
+        if sys.platform != 'win32':
+            logger.info("Non-Windows platform detected, skipping single instance mutex.")
+            return True
             
-        logger.info("Single instance mutex acquired successfully.")
-        return True
+        try:
+            kernel32 = ctypes.windll.kernel32
+            self.mutex_handle = kernel32.CreateMutexW(None, True, self.mutex_name)
+            last_error = kernel32.GetLastError()
+            
+            if last_error == ERROR_ALREADY_EXISTS:
+                logger.warning("Another instance is already running!")
+                return False
+            
+            if self.mutex_handle is None:
+                logger.error(f"Failed to create mutex: error code {last_error}")
+                return False
+                
+            logger.info("Single instance mutex acquired successfully.")
+            return True
+        except Exception as e:
+            logger.error(f"Error acquiring mutex: {e}")
+            return True # Allow to run if mutex fails for unexpected reasons
         
     def release(self):
         """Release the mutex when shutting down."""
-        if self.mutex_handle:
-            ctypes.windll.kernel32.ReleaseMutex(self.mutex_handle)
-            ctypes.windll.kernel32.CloseHandle(self.mutex_handle)
+        if self.mutex_handle and sys.platform == 'win32':
+            try:
+                ctypes.windll.kernel32.ReleaseMutex(self.mutex_handle)
+                ctypes.windll.kernel32.CloseHandle(self.mutex_handle)
+            except Exception:
+                pass
             self.mutex_handle = None
 
 # Global mutex instance
@@ -130,7 +145,9 @@ def validate_config(config):
         for proc in game_processes:
             if isinstance(proc, str) and proc.strip():
                 # Sanitize: remove path separators, keep only filename
-                sanitized = os.path.basename(proc.strip())
+                # Handle both Windows (\) and Unix (/) separators regardless of current OS
+                path_str = proc.strip()
+                sanitized = path_str.replace('\\', '/').split('/')[-1]
                 if sanitized:
                     valid_processes.append(sanitized)
                 else:
@@ -226,6 +243,9 @@ def check_vcredist_installed():
     Check if Visual C++ Redistributable 2015-2022 (x64) is installed.
     Returns True if found, False otherwise.
     """
+    if sys.platform != 'win32':
+        return True # Assume True on non-Windows for testing purposes
+        
     registry_paths = [
         # VC++ 2015-2022 x64 (various versions)
         r"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
@@ -234,18 +254,20 @@ def check_vcredist_installed():
     
     for path in registry_paths:
         try:
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
-            installed, _ = winreg.QueryValueEx(key, "Installed")
-            winreg.CloseKey(key)
-            if installed == 1:
-                return True
-        except (FileNotFoundError, OSError):
+            if winreg:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
+                installed, _ = winreg.QueryValueEx(key, "Installed")
+                winreg.CloseKey(key)
+                if installed == 1:
+                    return True
+        except (FileNotFoundError, OSError, AttributeError):
             continue
     
     # Alternative check: look for the DLL directly
     try:
-        ctypes.WinDLL("vcruntime140.dll")
-        return True
+        if hasattr(ctypes, 'WinDLL'):
+            ctypes.WinDLL("vcruntime140.dll")
+            return True
     except OSError:
         pass
     
@@ -290,14 +312,20 @@ def prompt_vcredist_install():
 
 def get_startup_folder():
     """Get the Windows Startup folder path."""
-    import winreg
-    key = winreg.OpenKey(
-        winreg.HKEY_CURRENT_USER,
-        r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
-    )
-    startup_path, _ = winreg.QueryValueEx(key, "Startup")
-    winreg.CloseKey(key)
-    return startup_path
+    if sys.platform != 'win32':
+        return "/tmp" # Fallback for testing
+        
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
+        )
+        startup_path, _ = winreg.QueryValueEx(key, "Startup")
+        winreg.CloseKey(key)
+        return startup_path
+    except Exception:
+        return os.path.join(os.environ.get('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs\Startup')
 
 def get_startup_shortcut_path():
     """Get the path where our startup shortcut would be."""

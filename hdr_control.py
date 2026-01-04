@@ -1,5 +1,18 @@
 import ctypes
-from ctypes import wintypes, Structure
+try:
+    from ctypes import wintypes, Structure
+    user32 = ctypes.WinDLL('user32')
+except (ImportError, AttributeError, OSError):
+    # Fallback for non-Windows platforms (primarily for unit testing)
+    class MockWintypes:
+        DWORD = ctypes.c_uint32
+        LONG = ctypes.c_int32
+        UINT = ctypes.c_uint32
+        BOOL = ctypes.c_int
+    wintypes = MockWintypes()
+    Structure = ctypes.Structure
+    user32 = None
+
 import pyautogui
 import time
 
@@ -36,12 +49,14 @@ class DISPLAYCONFIG_MODE_INFO(Structure):
     _fields_ = [("infoType", wintypes.UINT), ("id", wintypes.UINT), ("adapterId", LUID), ("targetMode", wintypes.UINT * 4)]
 
 QDC_ONLY_ACTIVE_PATHS = 0x00000002
-user32 = ctypes.WinDLL('user32')
 
 def get_hdr_status():
     """
     Returns True if ANY connected monitor has HDR (Advanced Color) enabled.
     """
+    if user32 is None:
+        return False
+        
     path_count = wintypes.UINT(0)
     mode_count = wintypes.UINT(0)
 

@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from monitor_swapper import SingleInstanceMutex, ERROR_ALREADY_EXISTS
 
 
+@unittest.skipUnless(sys.platform == 'win32', "Requires Windows")
 class TestSingleInstanceMutex(unittest.TestCase):
     """Tests for the SingleInstanceMutex class."""
 
@@ -100,6 +101,7 @@ class TestSingleInstanceMutex(unittest.TestCase):
         self.assertTrue(second_result)
 
 
+@unittest.skipUnless(sys.platform == 'win32', "Requires Windows")
 class TestErrorAlreadyExistsConstant(unittest.TestCase):
     """Test that the ERROR_ALREADY_EXISTS constant is correct."""
 
